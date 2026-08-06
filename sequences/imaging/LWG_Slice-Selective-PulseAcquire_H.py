@@ -52,7 +52,7 @@
 #    actually plays out, then measuring the FWHM of the excitation profile
 #    (|Mxy| vs offset) and computing bandwidth x duration. Result: R = 4.96
 #    (rounds to the commonly-quoted literature value of ~4.9 for the E-BURP
-#    excitation family, Geen & Freeman, J. Magn. Reson. 93, 93-141, 1991 --
+#    excitation family, Geen &amp; Freeman, J. Magn. Reson. 93, 93-141, 1991 --
 #    a reassuring cross-check, not a coincidence). Used as 4.9 below. This
 #    is duration-independent (R = bandwidth x duration is a fixed property
 #    of a given pulse SHAPE -- the Bloch equation is invariant under jointly
@@ -176,7 +176,7 @@ RFA = check_range
 # rates together leaves the Bloch equation, and therefore R, unchanged) --
 # it does not need to be re-derived for whatever P90sh you actually use.
 # E-BURP-1 simulated at R=4.96, rounds to the ~4.9 commonly quoted in the
-# literature for the E-BURP excitation family (Geen & Freeman 1991) -- a
+# literature for the E-BURP excitation family (Geen &amp; Freeman 1991) -- a
 # reassuring cross-check. See file header design notes for the full method.
 R_EBURP1_90 = 4.9
 
@@ -269,7 +269,7 @@ def generate_shape(shape_name, n_steps, burp_coeffs_A=None, burp_coeffs_B=None):
             raise ValueError(
                 "shape '{0}' requested but no Fourier A-coefficients were "
                 "supplied (BurpCoeffsA is empty). EBURP1/REBURP are "
-                "defined in Geen, H. & Freeman, R., J. Magn. Reson. 93, "
+                "defined in Geen, H. &amp; Freeman, R., J. Magn. Reson. 93, "
                 "93-141 (1991) as a truncated Fourier series -- enter "
                 "coefficients as ExBurpCoeffsA/B, or use 'GAUSSIAN' / "
                 "'SINC' instead, which need no coefficients."
@@ -485,12 +485,12 @@ class Parameters:
 
     # General acquisition
     FrequencyBase = Parameter("SF", 59.7, ParameterTypes.Double, "H/F Base Freq [MHz]")
-    FrequencyOffset = Parameter("O1", 0.0, ParameterTypes.Double, "H/F Freq Offset [Hz] -- overall sequence reference (affects BOTH the pulse and acquisition); leave at 0 (or your usual reference) and use SlicePPM below to position the slice")
+    FrequencyOffset = Parameter("O1", 0.0, ParameterTypes.Double, "H/F Freq Offset [Hz] -- sequence-wide ref.; use SlicePPM to position the slice")
     TxPPM = Parameter("TxPPM", 0.0, ParameterTypes.Double, "H/F TX Freq Offset [ppm]")
 
     # *** THE clear, obvious place to set the slice/pulse centre frequency ***
-    SlicePPM = Parameter("SlicePPM", 0.0, ParameterTypes.Double, "*** SLICE / PULSE CENTRE FREQUENCY [ppm] relative to SF+O1 -- SET THIS to position the excited slice. Converted internally to Hz (SlicePPM x SF) and applied ONLY to the shaped pulse; acquisition stays referenced to SF+O1. ***")
-    PulseOffsetTrim = Parameter("PulseOffsetTrim", 0.0, ParameterTypes.Double, "Fine-trim [Hz] added on top of SlicePPM x SF -- for sub-ppm adjustment only; leave at 0 normally")
+    SlicePPM = Parameter("SlicePPM", 0.0, ParameterTypes.Double, "*** Slice/Pulse Centre Freq [ppm] rel. SF+O1 -- SET to position the excited slice ***")
+    PulseOffsetTrim = Parameter("PulseOffsetTrim", 0.0, ParameterTypes.Double, "Fine-trim [Hz] on top of SlicePPM x SF -- sub-ppm adjustment only, normally 0")
 
     ReceiverPoints = Parameter("NP", 1024, ParameterTypes.Int32, "Acquisition Points")
     ReceiverAttenuation = Parameter("RA", 34, ParameterTypes.Int32, "RX Attenuation [0&#8230;77dB]")
@@ -508,26 +508,26 @@ class Parameters:
 
     # Shaped (spatially slice-selective) excitation pulse -- synthesised ON
     # THE FLY (see generate_shape()/shaped_pulse() above). Default =
-    # E-BURP-1 (Geen & Freeman 1991, Table 2, nmax=8).
-    ExcitationShape = Parameter("ExShape", "EBURP1", ParameterTypes.String, "Excitation (90) Shape [EBURP1 (default), GAUSSIAN, SINC, or BURP -- see ExBurpCoeffsA/B]")
-    ExBurpCoeffsA = Parameter("ExBurpCoeffsA", "0.23,0.89,-1.02,-0.25,0.14,0.03,0.04,-0.03,0.00", ParameterTypes.String, "E-BURP-1 Fourier cosine coeffs A0..A8 (Geen & Freeman 1991, Table 2, nmax=8) -- used when ExShape=EBURP1/BURP")
-    ExBurpCoeffsB = Parameter("ExBurpCoeffsB", "0.00,-0.40,-1.42,0.74,0.06,0.03,-0.04,-0.02,0.01", ParameterTypes.String, "E-BURP-1 Fourier sine coeffs B0(unused)..B8 (Geen & Freeman 1991, Table 2, nmax=8) -- used when ExShape=EBURP1/BURP")
-    P90sh = Parameter("P90sh", 5000.0, ParameterTypes.Double, "Shaped 90&#176; Pulse Width [&#956;s] -- also sets shape resolution (1 point/&#956;s) AND (with G1/GradCal_HzPerCm) the excited slice width -- see ExcitedWidth logged every run")
+    # E-BURP-1 (Geen &amp; Freeman 1991, Table 2, nmax=8).
+    ExcitationShape = Parameter("ExShape", "EBURP1", ParameterTypes.String, "Excitation (90) Shape [EBURP1(default)/GAUSSIAN/SINC/BURP] -- see ExBurpCoeffsA/B")
+    ExBurpCoeffsA = Parameter("ExBurpCoeffsA", "0.23,0.89,-1.02,-0.25,0.14,0.03,0.04,-0.03,0.00", ParameterTypes.String, "E-BURP-1 cosine coeffs A0..A8 (Geen &amp; Freeman'91 Tbl.2) -- for ExShape=EBURP1/BURP")
+    ExBurpCoeffsB = Parameter("ExBurpCoeffsB", "0.00,-0.40,-1.42,0.74,0.06,0.03,-0.04,-0.02,0.01", ParameterTypes.String, "E-BURP-1 sine coeffs B0..B8 (Geen &amp; Freeman'91 Tbl.2) -- for ExShape=EBURP1/BURP")
+    P90sh = Parameter("P90sh", 5000.0, ParameterTypes.Double, "Shaped 90&#176; Width [&#956;s] (=shape resolution, 1pt/&#956;s); also sets excited slice width")
 
     TXAmplitude90 = Parameter("RFAsh0", 0.30, ParameterTypes.Double,
-                              "Shaped 90&#176; TX Power [0.0&#8230;1.0 of LP max] -- CALIBRATE via nutation, see LWG_Selective-Echo_H.py / the calibration markdown", RFA, min=0.0, max=1.0)
-    LPMaxFraction = Parameter("LPMaxFraction", 0.10, ParameterTypes.Double, "LP Port Max Power as Fraction of HP Port [0.0&#8230;1.0] -- your measured value")
+                              "Shaped 90&#176; TX Power [0&#8230;1.0 of LP max] -- CALIBRATE via nutation, see LWG_Selective-Echo_H.py", RFA, min=0.0, max=1.0)
+    LPMaxFraction = Parameter("LPMaxFraction", 0.10, ParameterTypes.Double, "LP Port Max as Fraction of HP [0&#8230;1.0] -- your measured value")
 
     # OPTIONAL power calculator -- OFF by default (PowerCalcMethod='manual').
     # See LWG_Selective-Echo_H.py / LWG_Selective-Pulse-Power-Calibration.md
     # for the full explanation of each method.
-    PowerCalcMethod = Parameter("PowerCalcMethod", "manual", ParameterTypes.String, "RFAsh0 source: 'manual' (default, use as entered), 'shape' (calculate from hard-pulse calibration + shape integral), 'db' (legacy direct dB attenuation)")
-    RefAmplitude_HP = Parameter("RefAmplitude_HP", 0.40, ParameterTypes.Double, "Reference HARD-pulse relative amplitude on the HIGH-power port for a KNOWN, calibrated flip angle -- used if PowerCalcMethod='shape' or 'db'")
-    HardPulseWidth = Parameter("P1Hard", 9.58, ParameterTypes.Double, "Reference HARD 90&#176; pulse width [&#956;s] at RefAmplitude_HP on the HIGH-power port -- only used if PowerCalcMethod='shape'")
-    ExcitationRotation = Parameter("ExRotation", 90.0, ParameterTypes.Double, "Target rotation of the excitation shape [&#176;] (E-BURP-1 = 90) -- only used if PowerCalcMethod='shape'")
-    PowerAdjust_dB = Parameter("PowerAdjust_dB", 0.0, ParameterTypes.Double, "Manual fine-tune [dB, amplitude convention] on top of the 'shape' calculation -- equivalent to a Bruker cnst0. Only used if PowerCalcMethod='shape'")
-    Excitation_dB = Parameter("Excitation_dB", 0.0, ParameterTypes.Double, "Excitation-pulse power, as dB ATTENUATION relative to RefAmplitude_HP -- only used if PowerCalcMethod='db'")
-    DbConvention = Parameter("DbConvention", "amplitude", ParameterTypes.String, "dB convention: 'amplitude' (B1/voltage, usual NMR convention) or 'power' -- only used if PowerCalcMethod='db'")
+    PowerCalcMethod = Parameter("PowerCalcMethod", "manual", ParameterTypes.String, "RFAsh0 source: manual(default)/shape(recommended)/db")
+    RefAmplitude_HP = Parameter("RefAmplitude_HP", 0.40, ParameterTypes.Double, "Ref. hard-pulse rel. amplitude [0&#8230;1] on HP port, known flip angle -- for shape/db methods")
+    HardPulseWidth = Parameter("P1Hard", 9.58, ParameterTypes.Double, "Ref. hard 90&#176; width [&#956;s] at RefAmplitude_HP on HP port -- for 'shape' method")
+    ExcitationRotation = Parameter("ExRotation", 90.0, ParameterTypes.Double, "Target rotation of shape [&#176;] (EBURP1=90) -- for 'shape' method")
+    PowerAdjust_dB = Parameter("PowerAdjust_dB", 0.0, ParameterTypes.Double, "Manual fine-tune [dB] on top of 'shape' calc -- set AFTER nutation check")
+    Excitation_dB = Parameter("Excitation_dB", 0.0, ParameterTypes.Double, "Power as dB attenuation vs RefAmplitude_HP (+ve=less power) -- for 'db' method")
+    DbConvention = Parameter("DbConvention", "amplitude", ParameterTypes.String, "dB convention: amplitude(B1,usual)/power -- for 'db' method")
 
     # Slice-select gradient -- FPX/FPY/FPZ are the ONLY place per-axis
     # calibration is applied (via GradientMatrix() in run()); G1 is the
@@ -542,18 +542,18 @@ class Parameters:
     RampTime = Parameter("D70", 200.0, ParameterTypes.Double, "Gradient Ramp Time [&#956;s]")
     GradSettle = Parameter("D73", 200.0, ParameterTypes.Double, "Gradient Settling Duration (before acquisition) [&#956;s]")
     PreGrad = Parameter("D75", 200.0, ParameterTypes.Double, "Pre-Gradient Time (before ramp-up starts) [&#956;s]")
-    RephaseFraction = Parameter("RephaseFrac", 0.5, ParameterTypes.Double, "Slice REPHASE gradient lobe area, as a fraction of the excitation gradient's area -- 0.5 is the standard starting point for a symmetric pulse; E-BURP-1 is intentionally asymmetric, so fine-tune empirically (scan this and maximise the FID amplitude) -- see design notes")
+    RephaseFraction = Parameter("RephaseFrac", 0.5, ParameterTypes.Double, "Slice rephase lobe area, fraction of excitation gradient area -- 0.5 default, fine-tune empirically")
 
     # *** Gradient calibration -- UNCALIBRATED PLACEHOLDER, see design notes ***
-    GradCal_HzPerCm = Parameter("GradCal", 1000.0, ParameterTypes.Double, "*** PLACEHOLDER, UNCALIBRATED *** Slice-select gradient calibration [Hz/cm] at G1*FP=1.0 for your target nucleus -- determine empirically (phantom of known length + LWG_1D-Image-Echo_H.py or LWG_1D-Image-UTE_H.py) before trusting the logged ExcitedWidth")
+    GradCal_HzPerCm = Parameter("GradCal", 1000.0, ParameterTypes.Double, "*** PLACEHOLDER, UNCALIBRATED *** Gradient calibration [Hz/cm] at G1*FP=1.0 -- determine empirically before trusting ExcitedWidth")
 
     # Mains-lock trigger -- OFF by default, see mains_lock_trigger() docstring.
     UseMainsLock = Parameter("UseMainsLock", 0, ParameterTypes.Int32, "Emit Mains-Lock Trigger Before Sequence [0=Off(default),1=On]")
     MainsLockChannel = Parameter("MainsLockChannel", 2, ParameterTypes.Int32, "Mains-Lock ExternalTrigger Channel [1-3, unconfirmed for X-Pulse]")
 
     # Duty-cycle guard rails (conservative placeholders, not vendor specs)
-    MaxRFDuty = Parameter("MaxRFDuty", 0.05, ParameterTypes.Double, "Max RF Duty Cycle Warning Threshold [0.0&#8230;1.0]")
-    MaxGradDuty = Parameter("MaxGradDuty", 0.10, ParameterTypes.Double, "Max Gradient Duty Cycle Warning Threshold [0.0&#8230;1.0]")
+    MaxRFDuty = Parameter("MaxRFDuty", 0.05, ParameterTypes.Double, "Max RF Duty Cycle Warning Threshold [0&#8230;1.0]")
+    MaxGradDuty = Parameter("MaxGradDuty", 0.10, ParameterTypes.Double, "Max Gradient Duty Cycle Warning Threshold [0&#8230;1.0]")
 
     # Phases (simple 2-step)
     PH1 = Parameter("PH1", "0,180", ParameterTypes.String, "Shaped 90&#176; Pulse Phase")

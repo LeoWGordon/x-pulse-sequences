@@ -420,19 +420,19 @@ class Parameters:
     XGradNorm = Parameter("FPX", 1.0, ParameterTypes.Double, "X Grad Scaler [0.0&#8230;1.0]")
     YGradNorm = Parameter("FPY", 1.0, ParameterTypes.Double, "Y Grad Scaler [0.0&#8230;1.0]")
     ZGradNorm = Parameter("FPZ", 1.0, ParameterTypes.Double, "Z Grad Scaler [0.0&#8230;1.0]")
-    Probe = Parameter("Probe", "HFX", ParameterTypes.String, "Probe fitted to magnet ['HFX'=H/FX broadband imaging probe (gradient-calibrated), 'LOWGAMMA'=low-gamma probe (gradient NOT YET CALIBRATED)]")
+    Probe = Parameter("Probe", "HFX", ParameterTypes.String, "Probe fitted to magnet [HFX(default, calibrated)/LOWGAMMA(not yet calibrated)]")
 
     # Sequence specific
-    GradientOnTime = Parameter("D71", 1000.0, ParameterTypes.Double, "Gradient Duration [&#956;s] (dephase lobe plateau; readout lobe plateau is 2*this+2*RampTime, same as v3.1)")
+    GradientOnTime = Parameter("D71", 1000.0, ParameterTypes.Double, "Gradient Duration [&#956;s] -- dephase lobe plateau (readout = 2*this+2*RampTime)")
     RampTime = Parameter("D70", 100.0, ParameterTypes.Double, "Gradient Ramp Time [&#956;s]")
-    GradSettle = Parameter("D73", 100.0, ParameterTypes.Double, "Gradient Settling Duration [&#956;s] (used for BOTH lobes here, including the dephase->readout polarity reversal -- lengthen if you suspect eddy-current settling is polarity-dependent on your amplifier)")
+    GradSettle = Parameter("D73", 100.0, ParameterTypes.Double, "Gradient Settling Duration [&#956;s] -- used for both lobes incl. polarity reversal")
     Tau = Parameter("TAU", 10000, ParameterTypes.Int32, "Echo Time [&#956;s]")
     PreGrad = Parameter("D75", 100.0, ParameterTypes.Double, "Pre-Gradient Time [&#956;s]")
     Axis = Parameter("GradAxis", "z", ParameterTypes.String, "Gradient Axis")
     AxisList = Parameter("GradAxisList", "x,y,z,none", ParameterTypes.String, "Gradient Axes")
 
     UseMainsLock = Parameter("UseMainsLock", 0, ParameterTypes.Int32, "Emit Mains-Lock Trigger Before Sequence [0=Off(default),1=On]")
-    MainsLockChannel = Parameter("MainsLockChannel", 2, ParameterTypes.Int32, "Mains-Lock ExternalTrigger Channel [1-3, unconfirmed for X-Pulse -- see manual 3.7.19]")
+    MainsLockChannel = Parameter("MainsLockChannel", 2, ParameterTypes.Int32, "Mains-Lock ExternalTrigger Channel [1-3, unconfirmed for X-Pulse]")
 
     # Duty-cycle guard rails (conservative, user-adjustable placeholders)
     MaxRFDuty = Parameter("MaxRFDuty", 0.05, ParameterTypes.Double, "Max RF Duty Cycle Warning Threshold [0.0&#8230;1.0]")

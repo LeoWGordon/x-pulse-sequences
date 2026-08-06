@@ -289,9 +289,9 @@ def generate_shape(shape_name, n_steps, burp_coeffs_A=None, burp_coeffs_B=None):
             raise ValueError(
                 "shape '{0}' requested but no Fourier A-coefficients were "
                 "supplied (BurpCoeffsA is empty). EBURP1/REBURP are "
-                "defined in Geen, H. & Freeman, R., J. Magn. Reson. 93, "
+                "defined in Geen, H. &amp; Freeman, R., J. Magn. Reson. 93, "
                 "93-141 (1991) as a truncated Fourier series -- enter "
-                "coefficients as ExBurpCoeffsA/B or RefBurpCoeffsA/B, or "
+                "coefficients as ExBurpCoeffsA/B or RefocusBurpCoeffsA/B, or "
                 "use 'GAUSSIAN' / 'SINC' instead, which need no "
                 "coefficients.".format(shape_name))
         tau = np.linspace(0.0, 1.0, n_steps, endpoint=False)
@@ -499,12 +499,12 @@ class Parameters:
 
     # General acquisition
     FrequencyBase = Parameter("SF", 59.7, ParameterTypes.Double, "H/F Base Freq [MHz]")
-    FrequencyOffset = Parameter("O1", 0.0, ParameterTypes.Double, "H/F Freq Offset [Hz] -- overall sequence reference (affects BOTH the pulses and acquisition); leave at 0 (or your usual reference) and use SlicePPM below to position the slice")
+    FrequencyOffset = Parameter("O1", 0.0, ParameterTypes.Double, "H/F Freq Offset [Hz] -- sequence-wide ref.; use SlicePPM to position the slice")
     TxPPM = Parameter("TxPPM", 0.0, ParameterTypes.Double, "H/F TX Freq Offset [ppm]")
 
     # *** THE clear, obvious place to set the slice/pulse centre frequency ***
-    SlicePPM = Parameter("SlicePPM", 0.0, ParameterTypes.Double, "*** SLICE / PULSE CENTRE FREQUENCY [ppm] relative to SF+O1 -- SET THIS to position the excited slice. Converted internally to Hz (SlicePPM x SF) and applied to BOTH shaped pulses; acquisition stays referenced to SF+O1. ***")
-    PulseOffsetTrim = Parameter("PulseOffsetTrim", 0.0, ParameterTypes.Double, "Fine-trim [Hz] added on top of SlicePPM x SF -- for sub-ppm adjustment only; leave at 0 normally")
+    SlicePPM = Parameter("SlicePPM", 0.0, ParameterTypes.Double, "*** Slice/Pulse Centre Freq [ppm] rel. SF+O1 -- SET to position the excited slice (both shaped pulses) ***")
+    PulseOffsetTrim = Parameter("PulseOffsetTrim", 0.0, ParameterTypes.Double, "Fine-trim [Hz] on top of SlicePPM x SF -- sub-ppm adjustment only, normally 0")
 
     ReceiverPoints = Parameter("NP", 1024, ParameterTypes.Int32, "Acquisition Points")
     ReceiverAttenuation = Parameter("RA", 34, ParameterTypes.Int32, "RX Attenuation [0&#8230;77dB]")
@@ -521,44 +521,44 @@ class Parameters:
                               RD, min=100000, max=2000000000)
 
     # Shaped (spatially slice-selective) pulses -- synthesised ON THE FLY.
-    # Defaults = literature pulses: EXCITATION = E-BURP-1 (Geen & Freeman
+    # Defaults = literature pulses: EXCITATION = E-BURP-1 (Geen &amp; Freeman
     # 1991, Table 2, nmax=8), REFOCUSING = RE-BURP (Table 8, Np=256).
-    ExcitationShape = Parameter("ExShape", "EBURP1", ParameterTypes.String, "Excitation (90) Shape [EBURP1 (default), GAUSSIAN, SINC, or BURP -- see ExBurpCoeffsA/B]")
-    RefocusShape = Parameter("RefShape", "REBURP", ParameterTypes.String, "Refocusing (180) Shape [REBURP (default), GAUSSIAN, SINC, or BURP -- see RefBurpCoeffsA/B]")
-    ExBurpCoeffsA = Parameter("ExBurpCoeffsA", "0.23,0.89,-1.02,-0.25,0.14,0.03,0.04,-0.03,0.00", ParameterTypes.String, "E-BURP-1 Fourier cosine coeffs A0..A8 (Geen & Freeman 1991, Table 2, nmax=8)")
-    ExBurpCoeffsB = Parameter("ExBurpCoeffsB", "0.00,-0.40,-1.42,0.74,0.06,0.03,-0.04,-0.02,0.01", ParameterTypes.String, "E-BURP-1 Fourier sine coeffs B0(unused)..B8 (Geen & Freeman 1991, Table 2, nmax=8)")
-    RefBurpCoeffsA = Parameter("RefBurpCoeffsA", "0.49,-1.02,1.11,-1.57,0.83,-0.42,0.26,-0.16,0.10,-0.07,0.04,-0.03,0.01,-0.02,0.00,-0.01", ParameterTypes.String, "RE-BURP Fourier cosine coeffs A0..A15 (Geen & Freeman 1991, Table 8, Np=256)")
-    RefBurpCoeffsB = Parameter("RefBurpCoeffsB", "", ParameterTypes.String, "RE-BURP Fourier sine coeffs (none published -- RE-BURP is purely real; leave empty)")
+    ExcitationShape = Parameter("ExShape", "EBURP1", ParameterTypes.String, "Excitation (90) Shape [EBURP1(default)/GAUSSIAN/SINC/BURP] -- see ExBurpCoeffsA/B")
+    RefocusShape = Parameter("RefocusShape", "REBURP", ParameterTypes.String, "Refocusing (180) Shape [REBURP(default)/GAUSSIAN/SINC/BURP] -- see RefocusBurpCoeffsA/B")
+    ExBurpCoeffsA = Parameter("ExBurpCoeffsA", "0.23,0.89,-1.02,-0.25,0.14,0.03,0.04,-0.03,0.00", ParameterTypes.String, "E-BURP-1 cosine coeffs A0..A8 (Geen &amp; Freeman'91 Tbl.2)")
+    ExBurpCoeffsB = Parameter("ExBurpCoeffsB", "0.00,-0.40,-1.42,0.74,0.06,0.03,-0.04,-0.02,0.01", ParameterTypes.String, "E-BURP-1 sine coeffs B0..B8 (Geen &amp; Freeman'91 Tbl.2)")
+    RefocusBurpCoeffsA = Parameter("RefocusBurpCoeffsA", "0.49,-1.02,1.11,-1.57,0.83,-0.42,0.26,-0.16,0.10,-0.07,0.04,-0.03,0.01,-0.02,0.00,-0.01", ParameterTypes.String, "RE-BURP cosine coeffs A0..A15 (Geen &amp; Freeman'91 Tbl.8)")
+    RefocusBurpCoeffsB = Parameter("RefocusBurpCoeffsB", "", ParameterTypes.String, "RE-BURP sine coeffs -- none published, leave empty")
 
-    P90sh = Parameter("P90sh", 5000.0, ParameterTypes.Double, "Shaped 90&#176; (excitation) Pulse Width [&#956;s] -- also sets shape resolution (1 point/&#956;s) AND, via G1/GradCal_HzPerCm, the excitation slice width")
+    P90sh = Parameter("P90sh", 5000.0, ParameterTypes.Double, "Shaped 90&#176; (excitation) Width [&#956;s] -- also sets shape res. + excitation slice width")
     # P180sh's displayed default already matches P90sh's default via the
     # R_REBURP_180/R_EBURP1_90 ratio (5.9/4.9), so the two slices are
     # consistent even before AutoMatchSlice recomputes it at run time.
-    P180sh = Parameter("P180sh", 6020.0, ParameterTypes.Double, "Shaped 180&#176; (refocusing) Pulse Width [&#956;s] -- IGNORED and recomputed from P90sh when AutoMatchSlice=1 (default); only takes effect if AutoMatchSlice=0")
-    AutoMatchSlice = Parameter("AutoMatchSlice", 1, ParameterTypes.Int32, "*** Auto-derive P180sh from P90sh so excitation and refocusing slices match at the same G1 [1=On(default; RECOMMENDED), 0=Off/manual P180sh] ***")
+    P180sh = Parameter("P180sh", 6020.0, ParameterTypes.Double, "Shaped 180&#176; (refocusing) Width [&#956;s] -- IGNORED/recomputed from P90sh if AutoMatchSlice=1")
+    AutoMatchSlice = Parameter("AutoMatchSlice", 1, ParameterTypes.Int32, "*** Auto-derive P180sh from P90sh to match slices [1=On(default,RECOMMENDED), 0=manual P180sh] ***")
 
     TXAmplitude90 = Parameter("RFAsh0", 0.30, ParameterTypes.Double,
-                              "Shaped 90&#176; TX Power [0.0&#8230;1.0 of LP max] -- CALIBRATE via nutation, see LWG_Selective-Echo_H.py / the calibration markdown", RFA, min=0.0, max=1.0)
+                              "Shaped 90&#176; TX Power [0&#8230;1.0 of LP max] -- CALIBRATE via nutation, see LWG_Selective-Echo_H.py", RFA, min=0.0, max=1.0)
     TXAmplitude180 = Parameter("RFAsh1", 0.30, ParameterTypes.Double,
-                               "Shaped 180&#176; TX Power [0.0&#8230;1.0 of LP max] -- CALIBRATE via nutation, see LWG_Selective-Echo_H.py / the calibration markdown", RFA, min=0.0, max=1.0)
-    LPMaxFraction = Parameter("LPMaxFraction", 0.10, ParameterTypes.Double, "LP Port Max Power as Fraction of HP Port [0.0&#8230;1.0] -- your measured value")
+                               "Shaped 180&#176; TX Power [0&#8230;1.0 of LP max] -- CALIBRATE via nutation, see LWG_Selective-Echo_H.py", RFA, min=0.0, max=1.0)
+    LPMaxFraction = Parameter("LPMaxFraction", 0.10, ParameterTypes.Double, "LP Port Max as Fraction of HP [0&#8230;1.0] -- your measured value")
 
     # OPTIONAL power calculator -- OFF by default. See LWG_Selective-Echo_H.py
     # / LWG_Selective-Pulse-Power-Calibration.md for the full explanation.
-    PowerCalcMethod = Parameter("PowerCalcMethod", "manual", ParameterTypes.String, "RFAsh0/RFAsh1 source: 'manual' (default), 'shape' (calculate from hard-pulse calibration + shape integral), 'db' (legacy direct dB attenuation)")
-    RefAmplitude_HP = Parameter("RefAmplitude_HP", 0.40, ParameterTypes.Double, "Reference HARD-pulse relative amplitude on the HIGH-power port for a KNOWN, calibrated flip angle -- used if PowerCalcMethod='shape' or 'db'")
-    HardPulseWidth = Parameter("P1Hard", 9.58, ParameterTypes.Double, "Reference HARD 90&#176; pulse width [&#956;s] at RefAmplitude_HP on the HIGH-power port -- only used if PowerCalcMethod='shape'")
-    ExcitationRotation = Parameter("ExRotation", 90.0, ParameterTypes.Double, "Target rotation of the excitation shape [&#176;] (E-BURP-1 = 90) -- only used if PowerCalcMethod='shape'")
-    RefocusRotation = Parameter("RefRotation", 180.0, ParameterTypes.Double, "Target rotation of the refocusing shape [&#176;] (RE-BURP = 180) -- only used if PowerCalcMethod='shape'")
-    PowerAdjust_dB = Parameter("PowerAdjust_dB", 0.0, ParameterTypes.Double, "Manual fine-tune [dB, amplitude convention] on top of the 'shape' calculation. Only used if PowerCalcMethod='shape'")
-    Excitation_dB = Parameter("Excitation_dB", 0.0, ParameterTypes.Double, "Excitation-pulse power, as dB ATTENUATION relative to RefAmplitude_HP -- only used if PowerCalcMethod='db'")
-    Refocus_dB = Parameter("Refocus_dB", 0.0, ParameterTypes.Double, "Refocusing-pulse power, as dB ATTENUATION relative to RefAmplitude_HP -- only used if PowerCalcMethod='db'")
-    DbConvention = Parameter("DbConvention", "amplitude", ParameterTypes.String, "dB convention: 'amplitude' (usual NMR convention) or 'power' -- only used if PowerCalcMethod='db'")
+    PowerCalcMethod = Parameter("PowerCalcMethod", "manual", ParameterTypes.String, "RFAsh0/RFAsh1 source: manual(default)/shape(recommended)/db")
+    RefAmplitude_HP = Parameter("RefAmplitude_HP", 0.40, ParameterTypes.Double, "Ref. hard-pulse rel. amplitude [0&#8230;1] on HP port, known flip angle -- for shape/db methods")
+    HardPulseWidth = Parameter("P1Hard", 9.58, ParameterTypes.Double, "Ref. hard 90&#176; width [&#956;s] at RefAmplitude_HP on HP port -- for 'shape' method")
+    ExcitationRotation = Parameter("ExRotation", 90.0, ParameterTypes.Double, "Target rotation of excitation shape [&#176;] (EBURP1=90) -- for 'shape' method")
+    RefocusRotation = Parameter("RefocusRotation", 180.0, ParameterTypes.Double, "Target rotation of refocusing shape [&#176;] (REBURP=180) -- for 'shape' method")
+    PowerAdjust_dB = Parameter("PowerAdjust_dB", 0.0, ParameterTypes.Double, "Manual fine-tune [dB] on top of 'shape' calc -- for PowerCalcMethod='shape'")
+    Excitation_dB = Parameter("Excitation_dB", 0.0, ParameterTypes.Double, "Excitation power as dB attenuation vs RefAmplitude_HP -- for 'db' method")
+    Refocus_dB = Parameter("Refocus_dB", 0.0, ParameterTypes.Double, "Refocusing power as dB attenuation vs RefAmplitude_HP -- for 'db' method")
+    DbConvention = Parameter("DbConvention", "amplitude", ParameterTypes.String, "dB convention: amplitude(B1,usual)/power -- for 'db' method")
 
     # Slice-select gradient -- SAME gradient (G1, same axis) is used for
     # BOTH pulses, by design (see 'MATCHING THE EXCITATION AND REFOCUSING
     # SLICES' above) -- there is deliberately no separate G-for-180 knob.
-    G1 = Parameter("G1", 1.0, ParameterTypes.Double, "Slice-Select Gradient Strength [-1.0&#8230;1.0] -- used for BOTH the excitation and refocusing pulses")
+    G1 = Parameter("G1", 1.0, ParameterTypes.Double, "Slice-Select Gradient Strength [-1.0&#8230;1.0] -- used for BOTH pulses")
     XGradNorm = Parameter("FPX", 1.0, ParameterTypes.Double, "X Grad Scaler [0.0&#8230;1.0]")
     YGradNorm = Parameter("FPY", 1.0, ParameterTypes.Double, "Y Grad Scaler [0.0&#8230;1.0]")
     ZGradNorm = Parameter("FPZ", 1.0, ParameterTypes.Double, "Z Grad Scaler [0.0&#8230;1.0]")
@@ -568,27 +568,27 @@ class Parameters:
     RampTime = Parameter("D70", 200.0, ParameterTypes.Double, "Gradient Ramp Time [&#956;s]")
     GradSettle = Parameter("D73", 200.0, ParameterTypes.Double, "Gradient Settling Duration [&#956;s]")
     PreGrad = Parameter("D75", 200.0, ParameterTypes.Double, "Pre-Gradient Time (before each ramp-up) [&#956;s]")
-    RephaseFraction = Parameter("RephaseFrac", 0.5, ParameterTypes.Double, "EXCITATION-only slice REPHASE gradient lobe area, as a fraction of the excitation gradient's area -- 0.5 is the standard starting point (E-BURP-1 is asymmetric, so fine-tune empirically). RE-BURP needs NO rephase lobe (self-refocusing by symmetry, see design notes)")
+    RephaseFraction = Parameter("RephaseFrac", 0.5, ParameterTypes.Double, "Excitation-only slice rephase lobe area, fraction of excitation gradient area -- 0.5 default, fine-tune empirically")
 
     # Echo timing
-    Tau = Parameter("TAU", 20000, ParameterTypes.Int32, "Echo &#964; Delay [&#956;s], pulse-CENTRE to pulse-CENTRE -- must comfortably exceed half the excitation/refocusing pulse widths plus crusher/gradient margins")
+    Tau = Parameter("TAU", 20000, ParameterTypes.Int32, "Echo &#964; Delay [&#956;s], pulse-centre to pulse-centre -- must exceed half pulse widths + crusher/gradient margins")
 
     # Crusher gradients around the refocusing pulse (same axis, same
     # polarity, equal area both sides -- see design notes)
     CrusherOn = Parameter("CrusherOn", 1, ParameterTypes.Int32, "Crusher gradients around the 180 [1=On(default), 0=Off]")
-    CrusherStrength = Parameter("CrusherG", 0.30, ParameterTypes.Double, "Crusher gradient strength [-1.0&#8230;1.0] -- kept modest relative to G1 since it shares the slice-select axis")
+    CrusherStrength = Parameter("CrusherG", 0.30, ParameterTypes.Double, "Crusher gradient strength [-1.0&#8230;1.0] -- keep modest relative to G1 (shares slice-select axis)")
     CrusherTime = Parameter("CrusherT", 1000.0, ParameterTypes.Double, "Crusher gradient hold time [&#956;s] (each side)")
 
     # *** Gradient calibration -- UNCALIBRATED PLACEHOLDER, see design notes ***
-    GradCal_HzPerCm = Parameter("GradCal", 1000.0, ParameterTypes.Double, "*** PLACEHOLDER, UNCALIBRATED *** Slice-select gradient calibration [Hz/cm] at G1*FP=1.0 for your target nucleus -- determine empirically (phantom of known length + LWG_1D-Image-Echo_H.py or LWG_1D-Image-UTE_H.py) before trusting the logged ExcitedWidth")
+    GradCal_HzPerCm = Parameter("GradCal", 1000.0, ParameterTypes.Double, "*** PLACEHOLDER, UNCALIBRATED *** Gradient calibration [Hz/cm] at G1*FP=1.0 -- determine empirically before trusting ExcitedWidth")
 
     # Mains-lock trigger -- OFF by default.
     UseMainsLock = Parameter("UseMainsLock", 0, ParameterTypes.Int32, "Emit Mains-Lock Trigger Before Sequence [0=Off(default),1=On]")
     MainsLockChannel = Parameter("MainsLockChannel", 2, ParameterTypes.Int32, "Mains-Lock ExternalTrigger Channel [1-3, unconfirmed for X-Pulse]")
 
     # Duty-cycle guard rails (conservative placeholders, not vendor specs)
-    MaxRFDuty = Parameter("MaxRFDuty", 0.05, ParameterTypes.Double, "Max RF Duty Cycle Warning Threshold [0.0&#8230;1.0]")
-    MaxGradDuty = Parameter("MaxGradDuty", 0.10, ParameterTypes.Double, "Max Gradient Duty Cycle Warning Threshold [0.0&#8230;1.0]")
+    MaxRFDuty = Parameter("MaxRFDuty", 0.05, ParameterTypes.Double, "Max RF Duty Cycle Warning Threshold [0&#8230;1.0]")
+    MaxGradDuty = Parameter("MaxGradDuty", 0.10, ParameterTypes.Double, "Max Gradient Duty Cycle Warning Threshold [0&#8230;1.0]")
 
     # Phases -- combined 2-step (90) x EXORCYCLE 4-step (180) = 8-step cycle.
     # ph1 cancels simple 90/DC artefacts; ph2 (EXORCYCLE: 0,90,180,270 on the
@@ -654,8 +654,8 @@ def run(comms):
 
     ExBurpA = parse_burp_coeffs(P.ExBurpCoeffsA)
     ExBurpB = parse_burp_coeffs(P.ExBurpCoeffsB)
-    RefBurpA = parse_burp_coeffs(P.RefBurpCoeffsA)
-    RefBurpB = parse_burp_coeffs(P.RefBurpCoeffsB)
+    RefocusBurpA = parse_burp_coeffs(P.RefocusBurpCoeffsA)
+    RefocusBurpB = parse_burp_coeffs(P.RefocusBurpCoeffsB)
 
     # ---- Optional power calculator override -------------------------------
     RFAsh0_effective = P.TXAmplitude90
@@ -664,19 +664,19 @@ def run(comms):
 
     if PowerMethod == 'shape':
         ExAmpProfile, _ = generate_shape(P.ExcitationShape, max(4, int(round(P.P90sh))), ExBurpA, ExBurpB)
-        RefAmpProfile, _ = generate_shape(P.RefocusShape, max(4, int(round(P180sh_eff))), RefBurpA, RefBurpB)
+        RefocusAmpProfile, _ = generate_shape(P.RefocusShape, max(4, int(round(P180sh_eff))), RefocusBurpA, RefocusBurpB)
         ExIntegFactor = shape_integration_factor(ExAmpProfile)
-        RefIntegFactor = shape_integration_factor(RefAmpProfile)
+        RefocusIntegFactor = shape_integration_factor(RefocusAmpProfile)
         RFAsh0_effective = estimate_shape_relative_scale(
             P.HardPulseWidth, P.RefAmplitude_HP, P.P90sh, P.ExcitationRotation,
             ExIntegFactor, P.LPMaxFraction, P.PowerAdjust_dB)
         RFAsh1_effective = estimate_shape_relative_scale(
             P.HardPulseWidth, P.RefAmplitude_HP, P180sh_eff, P.RefocusRotation,
-            RefIntegFactor, P.LPMaxFraction, P.PowerAdjust_dB)
+            RefocusIntegFactor, P.LPMaxFraction, P.PowerAdjust_dB)
         comms.log("PowerCalcMethod='shape': excitation integ.factor={0:.4f} "
                   "-> RFAsh0={1:.4f}; refocus integ.factor={2:.4f} -> "
                   "RFAsh1={3:.4f}.".format(ExIntegFactor, RFAsh0_effective,
-                          RefIntegFactor, RFAsh1_effective))
+                          RefocusIntegFactor, RFAsh1_effective))
         if RFAsh0_effective > 1.0 or RFAsh1_effective > 1.0:
             comms.log("WARNING: calculated relative scale exceeds 1.0 -- "
                       "RFAsh0_effective={0:.4f}, RFAsh1_effective={1:.4f}."
@@ -698,21 +698,21 @@ def run(comms):
     # pulses ------------------------------------------------------------
     ExBW_Hz, ExWidth_cm, GradTotal = compute_excited_width(
         P, comms, P.P90sh, R_EBURP1_90, "EXCITATION (90)")
-    RefBW_Hz, RefWidth_cm, _ = compute_excited_width(
+    RefocusBW_Hz, RefocusWidth_cm, _ = compute_excited_width(
         P, comms, P180sh_eff, R_REBURP_180, "REFOCUSING (180)")
-    if ExWidth_cm is not None and RefWidth_cm is not None:
-        mismatch = abs(ExWidth_cm - RefWidth_cm) / ExWidth_cm
+    if ExWidth_cm is not None and RefocusWidth_cm is not None:
+        mismatch = abs(ExWidth_cm - RefocusWidth_cm) / ExWidth_cm
         if mismatch > 0.02:
             comms.log("WARNING: excitation slice ({0:.3f} cm) and "
                       "refocusing slice ({1:.3f} cm) differ by {2:.1%} -- "
                       "the echo will only reflect their OVERLAP, narrower "
                       "than either pulse's own width. Set AutoMatchSlice=1, "
                       "or manually set P180sh = P90sh x {3:.4f}."
-                      .format(ExWidth_cm, RefWidth_cm, mismatch, RValueRatio))
+                      .format(ExWidth_cm, RefocusWidth_cm, mismatch, RValueRatio))
         else:
             comms.log("Excitation and refocusing slice widths match to "
                       "within {0:.2%} ({1:.3f} cm vs {2:.3f} cm) -- good."
-                      .format(mismatch, ExWidth_cm, RefWidth_cm))
+                      .format(mismatch, ExWidth_cm, RefocusWidth_cm))
 
     def jcamp_meta():
         global BLP
@@ -730,8 +730,8 @@ def run(comms):
                 "jc_slicePPM={0}".format(P.SlicePPM),
                 "jc_excitedBW_ex_Hz={0:.2f}".format(ExBW_Hz),
                 "jc_excitedWidth_ex_cm={0}".format("{0:.4f}".format(ExWidth_cm) if ExWidth_cm is not None else "uncalibrated"),
-                "jc_excitedBW_ref_Hz={0:.2f}".format(RefBW_Hz),
-                "jc_excitedWidth_ref_cm={0}".format("{0:.4f}".format(RefWidth_cm) if RefWidth_cm is not None else "uncalibrated"),
+                "jc_excitedBW_ref_Hz={0:.2f}".format(RefocusBW_Hz),
+                "jc_excitedWidth_ref_cm={0}".format("{0:.4f}".format(RefocusWidth_cm) if RefocusWidth_cm is not None else "uncalibrated"),
                 "jc_P180sh_effective_us={0:.2f}".format(P180sh_eff),
                     ]
         return jc_data
@@ -794,15 +794,15 @@ def run(comms):
 
     # Refocusing event: ramp-up, shaped pulse dwell, ramp-down, settle --
     # NO rephase lobe (self-refocusing, see design notes).
-    RefGradEventTime = (P.PreGrad + P.RampTime + RefocusPulseWidth + P.RampTime
+    RefocusGradEventTime = (P.PreGrad + P.RampTime + RefocusPulseWidth + P.RampTime
                          + P.GradSettle)
-    RefLeadToCentre = P.PreGrad + P.RampTime + RefocusPulseWidth/2.0
-    RefCentreToEventEnd = RefocusPulseWidth/2.0 + P.RampTime + P.GradSettle
+    RefocusLeadToCentre = P.PreGrad + P.RampTime + RefocusPulseWidth/2.0
+    RefocusCentreToEventEnd = RefocusPulseWidth/2.0 + P.RampTime + P.GradSettle
 
     CrusherBlockTime = (P.PreGrad + P.RampTime + P.CrusherTime + P.RampTime + P.GradSettle) if int(P.CrusherOn) != 0 else 0.0
 
     rf_on_time = ExcitationPulseWidth + RefocusPulseWidth
-    grad_on_time = ExGradEventTime + RefGradEventTime + 2*CrusherBlockTime
+    grad_on_time = ExGradEventTime + RefocusGradEventTime + 2*CrusherBlockTime
     estimate_duty_cycles(P, rf_on_time, grad_on_time, comms)
 
     for seqScans in range(P.NumScans+P.DS):
@@ -838,7 +838,7 @@ def run(comms):
                 apply_gradient(P.Axis, P.CrusherTime, P.RampTime, P.CrusherStrength, P.GradSettle, P.PreGrad)
 
             # ---- First TAU: excitation-centre to refocusing-centre --------
-            safe_delay(P.Tau - ExCentreToEventEnd - CrusherBlockTime - RefLeadToCentre,
+            safe_delay(P.Tau - ExCentreToEventEnd - CrusherBlockTime - RefocusLeadToCentre,
                        "first TAU wait", comms)
 
             # ---- Refocusing: RE-BURP + slice-select gradient (matched) ---
@@ -846,7 +846,7 @@ def run(comms):
             Delay(P.PreGrad)
             slew_rate_fn(1.0, abs(P.G1/P.RampTime))
             gradient_fn(P.RampTime, P.G1)
-            shaped_pulse(P180sh_eff, ph["PH2"], P.RefocusShape, RFAsh1_effective, P.TXEnableTime, Frequency, PulseOffsetHz, RefBurpA, RefBurpB)
+            shaped_pulse(P180sh_eff, ph["PH2"], P.RefocusShape, RFAsh1_effective, P.TXEnableTime, Frequency, PulseOffsetHz, RefocusBurpA, RefocusBurpB)
             gradient_fn(P.RampTime, 0)
             gradient_fn(1.0, 0)
             Delay(P.GradSettle)
@@ -858,7 +858,7 @@ def run(comms):
             # ---- Second TAU: refocusing-centre to acquisition -------------
             # ReceiverFilter.dead_time is reserved out of this wait and paid
             # back explicitly (its own Delay, right before Receiver1 below).
-            safe_delay(P.Tau - RefCentreToEventEnd - CrusherBlockTime - ReceiverFilter.dead_time,
+            safe_delay(P.Tau - RefocusCentreToEventEnd - CrusherBlockTime - ReceiverFilter.dead_time,
                        "second TAU wait", comms)
 
             # ---- ACQU -------------------------------------------------------

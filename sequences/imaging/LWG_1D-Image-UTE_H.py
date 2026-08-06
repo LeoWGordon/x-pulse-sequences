@@ -352,15 +352,15 @@ class Parameters:
     DS = Parameter("DS", 0, ParameterTypes.Int32,"Dummy Scans")
 
     # Hardware and other standard delays
-    Dead1 = Parameter("Dead1", 20.0, ParameterTypes.Double, "H/F Probe Ringdown Time [&#956;s] -- part of the TE floor, keep as short as your probe allows")
-    TXEnableTime = Parameter("TXEnable", 20.0, ParameterTypes.Double, "TX Enable Time [&#956;s] -- part of the TE floor")
+    Dead1 = Parameter("Dead1", 20.0, ParameterTypes.Double, "H/F Probe Ringdown Time [&#956;s] -- part of TE floor")
+    TXEnableTime = Parameter("TXEnable", 20.0, ParameterTypes.Double, "TX Enable Time [&#956;s] -- part of TE floor")
     RecycleDelay = Parameter("RD", 500000, ParameterTypes.Int32, "Relaxation Delay [s]",
                               RD, min=100000, max=2000000000)
 
     # Hard pulse -- short, broadband, non-selective. A smaller flip angle
     # (shorter P90 and/or lower TXAmplitude) both shortens TE slightly and
     # allows faster repetition; tune to your T1/SNR needs.
-    P90 = Parameter("P90", 9.58, ParameterTypes.Double, "H/F 90&#176; (or smaller flip-angle) Pulse Width [&#956;s] -- part of the TE floor (TE includes P90/2)")
+    P90 = Parameter("P90", 9.58, ParameterTypes.Double, "H/F 90&#176; (or smaller) Pulse Width [&#956;s] -- TE includes P90/2")
     TXAmplitude = Parameter("RFA0", 0.4, ParameterTypes.Double,
                             "H/F TX Power [0.0&#8230;1.0]", RFA, min=0.0, max=1.0)
 
@@ -379,11 +379,11 @@ class Parameters:
     # for logging/downstream Hz-to-mm conversion (see report_probe_gradient()
     # above and leonmr/xpulse_imaging.py) -- has no effect on this pp's own
     # timing/hardware calls.
-    Probe = Parameter("Probe", "HFX", ParameterTypes.String, "Probe fitted to magnet ['HFX'=H/FX broadband imaging probe (gradient-calibrated), 'LOWGAMMA'=low-gamma probe (gradient NOT YET CALIBRATED)]")
+    Probe = Parameter("Probe", "HFX", ParameterTypes.String, "Probe fitted to magnet [HFX(default, calibrated)/LOWGAMMA(not yet calibrated)]")
 
     RampTime = Parameter("D70", 100.0, ParameterTypes.Double, "Gradient Ramp Time [&#956;s]")
     GradSettle = Parameter("D73", 100.0, ParameterTypes.Double, "Gradient Settling Duration [&#956;s]")
-    PreGrad = Parameter("D75", 100.0, ParameterTypes.Double, "Pre-Gradient Time [&#956;s] -- happens well before the pulse, does NOT add to TE")
+    PreGrad = Parameter("D75", 100.0, ParameterTypes.Double, "Pre-Gradient Time [&#956;s] -- before pulse, does not add to TE")
     Axis = Parameter("GradAxis", "z", ParameterTypes.String, "Gradient Axis")
     AxisList = Parameter("GradAxisList", "x,y,z,none", ParameterTypes.String, "Gradient Axes")
 
@@ -392,7 +392,7 @@ class Parameters:
     # pre-pulse delay directly to this sequence's short, tight TE). Channel
     # is unconfirmed for X-Pulse specifically.
     UseMainsLock = Parameter("UseMainsLock", 0, ParameterTypes.Int32, "Emit Mains-Lock Trigger Before Sequence [0=Off(default),1=On]")
-    MainsLockChannel = Parameter("MainsLockChannel", 2, ParameterTypes.Int32, "Mains-Lock ExternalTrigger Channel [1-3, unconfirmed for X-Pulse -- see manual 3.7.19]")
+    MainsLockChannel = Parameter("MainsLockChannel", 2, ParameterTypes.Int32, "Mains-Lock ExternalTrigger Channel [1-3, unconfirmed for X-Pulse]")
 
     # Duty-cycle guard rails (see estimate_duty_cycles() docstring: these are
     # conservative, user-adjustable placeholders, not vendor-confirmed specs)

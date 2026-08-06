@@ -58,7 +58,7 @@
 #        Delta ~= TM + TAU   (see time_calculation() / run() for the exact
 #        sub-delay algebra; this is an approximate description for anyone
 #        reasoning about b-values, not the literal code path).
-#    Approximate b-value (Stejskal & Tanner 1965): b = (gamma*G1_abs*delta)^2
+#    Approximate b-value (Stejskal &amp; Tanner 1965): b = (gamma*G1_abs*delta)^2
 #    * (Delta - delta/3), where delta = GradientOnTime + 2*RampTime (the
 #    effective encoding gradient duration) and G1_abs is your gradient in
 #    real units (T/m) -- G1 here is only a DIMENSIONLESS -1.0..1.0 DAC
@@ -376,18 +376,14 @@ class Parameters:
     # for logging/downstream Hz-to-mm conversion (see report_probe_gradient()
     # above and leonmr/xpulse_imaging.py) -- has no effect on this pp's own
     # timing/hardware calls.
-    Probe = Parameter("Probe", "HFX", ParameterTypes.String, "Probe fitted to magnet ['HFX'=H/FX broadband imaging probe (gradient-calibrated), 'LOWGAMMA'=low-gamma probe (gradient NOT YET CALIBRATED)]")
+    Probe = Parameter("Probe", "HFX", ParameterTypes.String, "Probe fitted to magnet ['HFX'=calibrated, 'LOWGAMMA'=NOT YET CALIBRATED]")
 
     # Sequence-specific timing
     Tau = Parameter("TAU", 20000.0, ParameterTypes.Double,
-                     "TAU [&#956;s] -- delay P1-to-P2 AND P3-to-acquisition "
-                     "(symmetric; each side contains one gradient pulse). "
-                     "Must comfortably exceed PreGrad + 2*RampTime + "
-                     "GradientOnTime + GradSettle + P90.")
+                     "TAU [&#956;s], P1-to-P2 and P3-to-acq (symmetric) -- "
+                     "must exceed PreGrad+2*RampTime+GradientOnTime+GradSettle+P90")
     TM = Parameter("TM", 50000.0, ParameterTypes.Double,
-                    "Mixing Time [&#956;s] -- P2-to-P3 delay, during which "
-                    "the stored coherence decays with T1 (not T2). "
-                    "Approximate diffusion time Delta ~= TM + TAU.")
+                    "Mixing Time [&#956;s], P2-to-P3 delay -- Delta &#8776; TM + TAU")
 
     # Duty-cycle guard rails
     MaxRFDuty = Parameter("MaxRFDuty", 0.05, ParameterTypes.Double, "Max RF Duty Cycle Warning Threshold [0.0&#8230;1.0]")
@@ -395,7 +391,7 @@ class Parameters:
 
     # Mains-lock trigger -- OFF by default (see mains_lock_trigger()).
     UseMainsLock = Parameter("UseMainsLock", 0, ParameterTypes.Int32, "Emit Mains-Lock Trigger Before Sequence [0=Off(default),1=On]")
-    MainsLockChannel = Parameter("MainsLockChannel", 2, ParameterTypes.Int32, "Mains-Lock ExternalTrigger Channel [1-3, unconfirmed for X-Pulse -- see manual 3.7.19]")
+    MainsLockChannel = Parameter("MainsLockChannel", 2, ParameterTypes.Int32, "Mains-Lock Trigger Channel [1-3, unconfirmed for X-Pulse]")
 
     # Phases -- taken directly from Bruker's diffSte pulse programme
     # (ph1/ph2/ph3/ph31), converted from quarter-cycle to degrees. See

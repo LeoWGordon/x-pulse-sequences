@@ -382,7 +382,7 @@ class Parameters:
     # for logging/downstream Hz-to-mm conversion (see report_probe_gradient()
     # above and leonmr/xpulse_imaging.py) -- has no effect on this pp's own
     # timing/hardware calls.
-    Probe = Parameter("Probe", "HFX", ParameterTypes.String, "Probe fitted to magnet ['HFX'=H/FX broadband imaging probe (gradient-calibrated), 'LOWGAMMA'=low-gamma probe (gradient NOT YET CALIBRATED)]")
+    Probe = Parameter("Probe", "HFX", ParameterTypes.String, "Probe fitted to magnet [HFX(default, calibrated)/LOWGAMMA(not yet calibrated)]")
     # Soft/Selective pulses
 
     # Special acquisition
@@ -401,7 +401,7 @@ class Parameters:
     # X-Pulse specifically; 2 (MQC+'s mains-lock channel) is used as a
     # placeholder default, only relevant if you turn this on.
     UseMainsLock = Parameter("UseMainsLock", 0, ParameterTypes.Int32, "Emit Mains-Lock Trigger Before Sequence [0=Off(default),1=On]")
-    MainsLockChannel = Parameter("MainsLockChannel", 2, ParameterTypes.Int32, "Mains-Lock ExternalTrigger Channel [1-3, unconfirmed for X-Pulse -- see manual 3.7.19]")
+    MainsLockChannel = Parameter("MainsLockChannel", 2, ParameterTypes.Int32, "Mains-Lock ExternalTrigger Channel [1-3, unconfirmed for X-Pulse]")
 
     # Duty-cycle guard rails (see estimate_duty_cycles() docstring: these are
     # conservative, user-adjustable placeholders, not vendor-confirmed specs)

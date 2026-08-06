@@ -65,7 +65,7 @@
 #    actually plays out, then measuring the FWHM of the excitation profile
 #    (|Mxy| vs offset) and computing bandwidth x duration. Result: R = 4.96
 #    (rounds to the commonly-quoted literature value of ~4.9 for the E-BURP
-#    excitation family, Geen & Freeman, J. Magn. Reson. 93, 93-141, 1991 --
+#    excitation family, Geen &amp; Freeman, J. Magn. Reson. 93, 93-141, 1991 --
 #    a reassuring cross-check, not a coincidence). Used as 4.9 below. This
 #    is duration-independent (R = bandwidth x duration is a fixed property
 #    of a given pulse SHAPE -- the Bloch equation is invariant under jointly
@@ -189,7 +189,7 @@ RFA = check_range
 # rates together leaves the Bloch equation, and therefore R, unchanged) --
 # it does not need to be re-derived for whatever P90sh you actually use.
 # E-BURP-1 simulated at R=4.96, rounds to the ~4.9 commonly quoted in the
-# literature for the E-BURP excitation family (Geen & Freeman 1991) -- a
+# literature for the E-BURP excitation family (Geen &amp; Freeman 1991) -- a
 # reassuring cross-check. See file header design notes for the full method.
 R_EBURP1_90 = 4.9
 
@@ -282,7 +282,7 @@ def generate_shape(shape_name, n_steps, burp_coeffs_A=None, burp_coeffs_B=None):
             raise ValueError(
                 "shape '{0}' requested but no Fourier A-coefficients were "
                 "supplied (BurpCoeffsA is empty). EBURP1/REBURP are "
-                "defined in Geen, H. & Freeman, R., J. Magn. Reson. 93, "
+                "defined in Geen, H. &amp; Freeman, R., J. Magn. Reson. 93, "
                 "93-141 (1991) as a truncated Fourier series -- enter "
                 "coefficients as ExBurpCoeffsA/B, or use 'GAUSSIAN' / "
                 "'SINC' instead, which need no coefficients."
@@ -521,10 +521,10 @@ class Parameters:
 
     # Shaped (spatially slice-selective) excitation pulse -- synthesised ON
     # THE FLY (see generate_shape()/shaped_pulse() above). Default =
-    # E-BURP-1 (Geen & Freeman 1991, Table 2, nmax=8).
+    # E-BURP-1 (Geen &amp; Freeman 1991, Table 2, nmax=8).
     ExcitationShape = Parameter("ExShape", "EBURP1", ParameterTypes.String, "Excitation (90) Shape [EBURP1 (default), GAUSSIAN, SINC, or BURP -- see ExBurpCoeffsA/B]")
-    ExBurpCoeffsA = Parameter("ExBurpCoeffsA", "0.23,0.89,-1.02,-0.25,0.14,0.03,0.04,-0.03,0.00", ParameterTypes.String, "E-BURP-1 Fourier cosine coeffs A0..A8 (Geen & Freeman 1991, Table 2, nmax=8) -- used when ExShape=EBURP1/BURP")
-    ExBurpCoeffsB = Parameter("ExBurpCoeffsB", "0.00,-0.40,-1.42,0.74,0.06,0.03,-0.04,-0.02,0.01", ParameterTypes.String, "E-BURP-1 Fourier sine coeffs B0(unused)..B8 (Geen & Freeman 1991, Table 2, nmax=8) -- used when ExShape=EBURP1/BURP")
+    ExBurpCoeffsA = Parameter("ExBurpCoeffsA", "0.23,0.89,-1.02,-0.25,0.14,0.03,0.04,-0.03,0.00", ParameterTypes.String, "E-BURP-1 Fourier cosine coeffs A0..A8 (Geen &amp; Freeman 1991, Table 2, nmax=8) -- used when ExShape=EBURP1/BURP")
+    ExBurpCoeffsB = Parameter("ExBurpCoeffsB", "0.00,-0.40,-1.42,0.74,0.06,0.03,-0.04,-0.02,0.01", ParameterTypes.String, "E-BURP-1 Fourier sine coeffs B0(unused)..B8 (Geen &amp; Freeman 1991, Table 2, nmax=8) -- used when ExShape=EBURP1/BURP")
     P90sh = Parameter("P90sh", 5000.0, ParameterTypes.Double, "Shaped 90&#176; Pulse Width [&#956;s] -- also sets shape resolution (1 point/&#956;s) AND (with G1/GradCal_HzPerCm) the excited slice width -- see ExcitedWidth logged every run")
 
     TXAmplitude90 = Parameter("RFAsh0", 0.30, ParameterTypes.Double,

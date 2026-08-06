@@ -44,7 +44,7 @@
 #    nothing pre-loaded on the hardware and is fully reproducible from this
 #    file alone.
 #  - DEFAULT SHAPES ARE NOW THE REAL LITERATURE PULSES: excitation =
-#    E-BURP-1, refocusing = RE-BURP (Geen, H. & Freeman, R., J. Magn.
+#    E-BURP-1, refocusing = RE-BURP (Geen, H. &amp; Freeman, R., J. Magn.
 #    Reson. 93, 93-141 (1991)), reconstructed from their published
 #    truncated-Fourier-series coefficients (E-BURP-1: Table 2, nmax=8;
 #    RE-BURP: Table 8, Np=256), transcribed from the two coefficient files
@@ -245,15 +245,15 @@ def generate_shape(shape_name, n_steps, burp_coeffs_A=None, burp_coeffs_B=None):
       'SINC'     -- truncated sinc x Hamming window (+/-5 main-lobe widths
                     each side). Sharper/more rectangular excitation profile
                     than a Gaussian. Exact closed-form.
-      'EBURP1' / 'REBURP' / 'BURP' -- reconstructs a Geen & Freeman
+      'EBURP1' / 'REBURP' / 'BURP' -- reconstructs a Geen &amp; Freeman
                     (J. Magn. Reson. 93, 93-141, 1991) BURP-family pulse
                     from its truncated Fourier series (burp_coeffs_A /
                     burp_coeffs_B). Defaults are pre-populated from the
                     paper's Table 2 (E-BURP-1, nmax=8) and Table 8 (RE-BURP,
                     Np=256), transcribed from the two files you added
-                    (ExBurpCoeffsA/B, RefBurpCoeffsA/B Parameters below) --
+                    (ExBurpCoeffsA/B, RefocusBurpCoeffsA/B Parameters below) --
                     RE-BURP is purely amplitude/0-180-phase modulated in the
-                    paper (no B_n terms), which is why RefBurpCoeffsB is
+                    paper (no B_n terms), which is why RefocusBurpCoeffsB is
                     empty by default; that's expected, not an error.
     """
     shape_name = shape_name.upper()
@@ -280,9 +280,9 @@ def generate_shape(shape_name, n_steps, burp_coeffs_A=None, burp_coeffs_B=None):
             raise ValueError(
                 "shape '{0}' requested but no Fourier A-coefficients were "
                 "supplied (BurpCoeffsA is empty). EBURP1/REBURP are "
-                "defined in Geen, H. & Freeman, R., J. Magn. Reson. 93, "
+                "defined in Geen, H. &amp; Freeman, R., J. Magn. Reson. 93, "
                 "93-141 (1991) as a truncated Fourier series -- enter "
-                "coefficients as ExBurpCoeffsA/B or RefBurpCoeffsA/B "
+                "coefficients as ExBurpCoeffsA/B or RefocusBurpCoeffsA/B "
                 "(comma-separated A0,A1,A2,... and B0,B1,B2,...), or use "
                 "'GAUSSIAN' / 'SINC' instead, which need no coefficients."
                 .format(shape_name))
@@ -514,13 +514,13 @@ class Parameters:
 
     # General acquisition
     FrequencyBase = Parameter("SF", 15.01, ParameterTypes.Double, "X Base Freq [MHz]")
-    FrequencyOffset = Parameter("O1", 0.0, ParameterTypes.Double, "X Freq Offset [Hz] -- overall sequence reference (affects BOTH the pulses and acquisition); leave at 0 (or your usual reference) and use PulseOffset below to target the selective pulses at a specific resonance")
+    FrequencyOffset = Parameter("O1", 0.0, ParameterTypes.Double, "X Freq Offset [Hz] -- sequence-wide ref.; use PulseOffset to target the selective pulses")
     TxPPM = Parameter("TxPPM", 0.0, ParameterTypes.Double, "X TX Freq Offset [ppm]")
     # THE clear, dedicated place to set the selective pulses' target
     # frequency: applied ONLY during the shaped pulses (see shaped_pulse()),
     # NOT to acquisition, so the acquired spectrum's frequency axis stays
     # fixed at SF+O1 while you tune/calibrate this independently.
-    PulseOffset = Parameter("PulseOffset", 0.0, ParameterTypes.Double, "Selective-Pulse Frequency Offset [Hz] -- targets ONLY the shaped 90/180 pulses at (SF+O1+PulseOffset); acquisition stays referenced to SF+O1. THIS is the parameter to sweep/set when calibrating or picking which resonance to image.")
+    PulseOffset = Parameter("PulseOffset", 0.0, ParameterTypes.Double, "Selective-Pulse Freq Offset [Hz] from SF+O1 -- SWEEP to target the shaped 90/180 pulses")
 
     ReceiverPoints = Parameter("NP", 1024, ParameterTypes.Int32, "Acquisition Points")
     ReceiverAttenuation = Parameter("RA", 34, ParameterTypes.Int32, "RX Attenuation [0&#8230;77dB]")
@@ -541,22 +541,22 @@ class Parameters:
     # Shapes are SYNTHESISED ON THE FLY (see generate_shape()/shaped_pulse()
     # above) -- no external shape file needed. 'GAUSSIAN' and 'SINC' work
     # out of the box. Now default to the real literature pulses: EXCITATION
-    # = EBURP1 (Geen & Freeman 1991, Table 2, nmax=8), REFOCUSING = REBURP
+    # = EBURP1 (Geen &amp; Freeman 1991, Table 2, nmax=8), REFOCUSING = REBURP
     # (Table 8, Np=256) -- coefficients transcribed from the two files you
     # provided. 'GAUSSIAN'/'SINC' remain available (no coefficients needed)
     # if you want a simpler fallback.
-    ExcitationShape = Parameter("ExShape", "EBURP1", ParameterTypes.String, "Excitation (90) Shape [EBURP1 (default), GAUSSIAN, SINC, or BURP -- see ExBurpCoeffsA/B]")
-    RefocusShape = Parameter("RefShape", "REBURP", ParameterTypes.String, "Refocusing (180) Shape [REBURP (default), GAUSSIAN, SINC, or BURP -- see RefBurpCoeffsA/B]")
-    # E-BURP-1 (excitation), Geen & Freeman 1991, Table 2, nmax=8 column.
-    ExBurpCoeffsA = Parameter("ExBurpCoeffsA", "0.23,0.89,-1.02,-0.25,0.14,0.03,0.04,-0.03,0.00", ParameterTypes.String, "E-BURP-1 Fourier cosine coeffs A0..A8 (Geen & Freeman 1991, Table 2, nmax=8) -- used when ExShape=EBURP1/BURP")
-    ExBurpCoeffsB = Parameter("ExBurpCoeffsB", "0.00,-0.40,-1.42,0.74,0.06,0.03,-0.04,-0.02,0.01", ParameterTypes.String, "E-BURP-1 Fourier sine coeffs B0(unused)..B8 (Geen & Freeman 1991, Table 2, nmax=8) -- used when ExShape=EBURP1/BURP")
-    # RE-BURP (refocusing), Geen & Freeman 1991, Table 8, Np=256 column --
+    ExcitationShape = Parameter("ExShape", "EBURP1", ParameterTypes.String, "Excitation (90) Shape [EBURP1(default)/GAUSSIAN/SINC/BURP] -- see ExBurpCoeffsA/B")
+    RefocusShape = Parameter("RefocusShape", "REBURP", ParameterTypes.String, "Refocusing (180) Shape [REBURP(default)/GAUSSIAN/SINC/BURP] -- see RefocusBurpCoeffsA/B")
+    # E-BURP-1 (excitation), Geen &amp; Freeman 1991, Table 2, nmax=8 column.
+    ExBurpCoeffsA = Parameter("ExBurpCoeffsA", "0.23,0.89,-1.02,-0.25,0.14,0.03,0.04,-0.03,0.00", ParameterTypes.String, "E-BURP-1 cosine coeffs A0..A8 (Geen &amp; Freeman'91 Tbl.2) -- for ExShape=EBURP1/BURP")
+    ExBurpCoeffsB = Parameter("ExBurpCoeffsB", "0.00,-0.40,-1.42,0.74,0.06,0.03,-0.04,-0.02,0.01", ParameterTypes.String, "E-BURP-1 sine coeffs B0..B8 (Geen &amp; Freeman'91 Tbl.2) -- for ExShape=EBURP1/BURP")
+    # RE-BURP (refocusing), Geen &amp; Freeman 1991, Table 8, Np=256 column --
     # purely real/cosine (no B_n terms; RE-BURP is amplitude/0-180-phase
-    # modulated only), hence RefBurpCoeffsB is empty by default.
-    RefBurpCoeffsA = Parameter("RefBurpCoeffsA", "0.49,-1.02,1.11,-1.57,0.83,-0.42,0.26,-0.16,0.10,-0.07,0.04,-0.03,0.01,-0.02,0.00,-0.01", ParameterTypes.String, "RE-BURP Fourier cosine coeffs A0..A15 (Geen & Freeman 1991, Table 8, Np=256) -- used when RefShape=REBURP/BURP")
-    RefBurpCoeffsB = Parameter("RefBurpCoeffsB", "", ParameterTypes.String, "RE-BURP Fourier sine coeffs (none published -- RE-BURP is purely real; leave empty) -- used when RefShape=REBURP/BURP")
-    P90sh = Parameter("P90sh", 5000.0, ParameterTypes.Double, "Shaped 90&#176; Pulse Width [&#956;s] -- also sets the shape resolution (1 point/&#956;s)")
-    P180sh = Parameter("P180sh", 10000.0, ParameterTypes.Double, "Shaped 180&#176; Pulse Width [&#956;s] -- also sets the shape resolution (1 point/&#956;s)")
+    # modulated only), hence RefocusBurpCoeffsB is empty by default.
+    RefocusBurpCoeffsA = Parameter("RefocusBurpCoeffsA", "0.49,-1.02,1.11,-1.57,0.83,-0.42,0.26,-0.16,0.10,-0.07,0.04,-0.03,0.01,-0.02,0.00,-0.01", ParameterTypes.String, "RE-BURP cosine coeffs A0..A15 (Geen &amp; Freeman'91 Tbl.8) -- for RefocusShape=REBURP/BURP")
+    RefocusBurpCoeffsB = Parameter("RefocusBurpCoeffsB", "", ParameterTypes.String, "RE-BURP sine coeffs -- none published, leave empty -- for RefocusShape=REBURP/BURP")
+    P90sh = Parameter("P90sh", 5000.0, ParameterTypes.Double, "Shaped 90&#176; Width [&#956;s] (=shape resolution, 1pt/&#956;s)")
+    P180sh = Parameter("P180sh", 10000.0, ParameterTypes.Double, "Shaped 180&#176; Width [&#956;s] (=shape resolution, 1pt/&#956;s)")
     # UNCALIBRATED starting values -- these now scale power on the LOW-POWER
     # (LP) port (see run(), 'Switch to LOW-POWER TX port'), not the
     # high-power port these numbers were previously (also uncalibrated)
@@ -567,10 +567,10 @@ class Parameters:
     # gradients) to find the real 90/180 condition via a nutation sweep
     # before trusting quantitative results from this sequence.
     TXAmplitude90 = Parameter("RFAsh0", 0.30, ParameterTypes.Double,
-                              "Shaped 90&#176; TX Power [0.0&#8230;1.0 of LP max] -- UNCALIBRATED, see LWG_Selective-Echo_X.py", RFA, min=0.0, max=1.0)
+                              "Shaped 90&#176; TX Power [0&#8230;1.0 of LP max] -- UNCALIBRATED, see LWG_Selective-Echo_X.py", RFA, min=0.0, max=1.0)
     TXAmplitude180 = Parameter("RFAsh1", 0.30, ParameterTypes.Double,
-                               "Shaped 180&#176; TX Power [0.0&#8230;1.0 of LP max] -- UNCALIBRATED, see LWG_Selective-Echo_X.py", RFA, min=0.0, max=1.0)
-    LPMaxFraction = Parameter("LPMaxFraction", 0.10, ParameterTypes.Double, "LP Port Max Power as Fraction of HP Port [0.0&#8230;1.0] -- your measured value, for reference/logging only; re-measure and update if it drifts")
+                               "Shaped 180&#176; TX Power [0&#8230;1.0 of LP max] -- UNCALIBRATED, see LWG_Selective-Echo_X.py", RFA, min=0.0, max=1.0)
+    LPMaxFraction = Parameter("LPMaxFraction", 0.10, ParameterTypes.Double, "LP Port Max as Fraction of HP [0&#8230;1.0] -- your measured value")
 
     # Gradients -- FPX/FPY/FPZ are the ONLY place per-axis calibration is
     # applied (via GradientMatrix() in run()); G1 is the single logical
@@ -584,13 +584,13 @@ class Parameters:
     # for logging/downstream Hz-to-mm conversion (see report_probe_gradient()
     # above and leonmr/xpulse_imaging.py) -- has no effect on this pp's own
     # timing/hardware calls.
-    Probe = Parameter("Probe", "HFX", ParameterTypes.String, "Probe fitted to magnet ['HFX'=H/FX broadband imaging probe (gradient-calibrated), 'LOWGAMMA'=low-gamma probe (gradient NOT YET CALIBRATED)]")
+    Probe = Parameter("Probe", "HFX", ParameterTypes.String, "Probe on magnet [HFX=H/FX imaging(gradient-calibrated), LOWGAMMA=low-gamma(NOT calibrated)]")
 
     # Sequence specific
     GradientOnTime = Parameter("D71", 1000.0, ParameterTypes.Double, "Gradient Duration [&#956;s]")
     RampTime = Parameter("D70", 100.0, ParameterTypes.Double, "Gradient Ramp Time [&#956;s]")
     GradSettle = Parameter("D73", 100.0, ParameterTypes.Double, "Gradient Settling Duration [&#956;s]")
-    Tau = Parameter("TAU", 20000, ParameterTypes.Int32, "Echo Time [&#956;s] -- must comfortably exceed P90sh/2 + P180sh (shaped pulses are long)")
+    Tau = Parameter("TAU", 20000, ParameterTypes.Int32, "Echo Time [&#956;s] -- must exceed P90sh/2 + P180sh")
     PreGrad = Parameter("D75", 100.0, ParameterTypes.Double, "Pre-Gradient Time [&#956;s]")
     Axis = Parameter("GradAxis", "z", ParameterTypes.String, "Gradient Axis")
     AxisList = Parameter("GradAxisList", "x,y,z,none", ParameterTypes.String, "Gradient Axes")
@@ -599,12 +599,12 @@ class Parameters:
     # mains_lock_trigger() docstring for why). Channel is unconfirmed for
     # X-Pulse specifically.
     UseMainsLock = Parameter("UseMainsLock", 0, ParameterTypes.Int32, "Emit Mains-Lock Trigger Before Sequence [0=Off(default),1=On]")
-    MainsLockChannel = Parameter("MainsLockChannel", 2, ParameterTypes.Int32, "Mains-Lock ExternalTrigger Channel [1-3, unconfirmed for X-Pulse -- see manual 3.7.19]")
+    MainsLockChannel = Parameter("MainsLockChannel", 2, ParameterTypes.Int32, "Mains-Lock ExternalTrigger Channel [1-3, unconfirmed for X-Pulse]")
 
     # Duty-cycle guard rails (see estimate_duty_cycles() docstring: these are
     # conservative, user-adjustable placeholders, not vendor-confirmed specs)
-    MaxRFDuty = Parameter("MaxRFDuty", 0.05, ParameterTypes.Double, "Max RF Duty Cycle Warning Threshold [0.0&#8230;1.0]")
-    MaxGradDuty = Parameter("MaxGradDuty", 0.10, ParameterTypes.Double, "Max Gradient Duty Cycle Warning Threshold [0.0&#8230;1.0]")
+    MaxRFDuty = Parameter("MaxRFDuty", 0.05, ParameterTypes.Double, "Max RF Duty Cycle Warning Threshold [0&#8230;1.0]")
+    MaxGradDuty = Parameter("MaxGradDuty", 0.10, ParameterTypes.Double, "Max Gradient Duty Cycle Warning Threshold [0&#8230;1.0]")
 
     # Phases (simple 2-step, since there's no composite-pulse phase cycle
     # to account for any more)
@@ -655,11 +655,11 @@ def run(comms):
     # parse_burp_coeffs() above. Excitation and refocusing pulses use
     # DIFFERENT published coefficient sets (E-BURP-1 vs RE-BURP), so they
     # are kept as separate pairs and each is only used if the matching
-    # ExShape/RefShape is actually set to EBURP1/REBURP/BURP.
+    # ExShape/RefocusShape is actually set to EBURP1/REBURP/BURP.
     ExBurpA = parse_burp_coeffs(P.ExBurpCoeffsA)
     ExBurpB = parse_burp_coeffs(P.ExBurpCoeffsB)
-    RefBurpA = parse_burp_coeffs(P.RefBurpCoeffsA)
-    RefBurpB = parse_burp_coeffs(P.RefBurpCoeffsB)
+    RefocusBurpA = parse_burp_coeffs(P.RefocusBurpCoeffsA)
+    RefocusBurpB = parse_burp_coeffs(P.RefocusBurpCoeffsB)
 
     def jcamp_meta():
         global BLP
@@ -780,7 +780,7 @@ def run(comms):
                     safe_delay(P.Tau - ExcitationPulseWidth/2 - RefocusPulseWidth/2.0,
                                "RF first-TAU wait", comms) # first tau delay
                     # Shaped 180 (refocusing) pulse
-                    shaped_pulse(P.P180sh, ph["PH2"], P.RefocusShape, P.TXAmplitude180, P.TXEnableTime, Frequency, P.PulseOffset, RefBurpA, RefBurpB)
+                    shaped_pulse(P.P180sh, ph["PH2"], P.RefocusShape, P.TXAmplitude180, P.TXEnableTime, Frequency, P.PulseOffset, RefocusBurpA, RefocusBurpB)
                     # TAU -- ReceiverFilter.dead_time is reserved out of this
                     # wait and paid back explicitly (as its own Delay, right
                     # before Receiver2 below) rather than left out entirely.
@@ -825,9 +825,9 @@ def run(comms):
 #    parallel with a single continuous Transmit2(duration) call -- the same
 #    technique already proven for the WURST-20 pulse in your 'sequence
 #    elements.py' template (there: amplitude+frequency; here:
-#    amplitude+phase). 'GAUSSIAN' (new default for both ExShape/RefShape,
+#    amplitude+phase). 'GAUSSIAN' (new default for both ExShape/RefocusShape,
 #    replacing 'GAUSS201') and 'SINC' are exact, closed-form, ready to use.
-#    'EBURP1'/'REBURP'/'BURP' reconstruct a genuine Geen & Freeman (1991)
+#    'EBURP1'/'REBURP'/'BURP' reconstruct a genuine Geen &amp; Freeman (1991)
 #    Fourier-series pulse IF you supply BurpCoeffsA/BurpCoeffsB (new string
 #    Parameters, empty by default) -- I deliberately did NOT hard-code
 #    published BURP coefficients from memory, since I don't have a verified
@@ -848,7 +848,7 @@ def run(comms):
 #    reasoning. MainsLockChannel is a Parameter, not hard-coded, since the
 #    manual doesn't list an X-Pulse row for the mains-lock trigger channel.
 # 4. Claude - 04/08/26 (v3.0, THIS VERSION) - REAL EBURP1/REBURP
-#    COEFFICIENTS: you provided the actual Geen & Freeman (1991)
+#    COEFFICIENTS: you provided the actual Geen &amp; Freeman (1991)
 #    coefficient tables (Table 2, E-BURP-1; Table 8, RE-BURP), so:
 #      a) Fixed a validation bug in generate_shape(): it previously
 #         required BOTH BurpCoeffsA and BurpCoeffsB to be non-empty before
@@ -860,13 +860,13 @@ def run(comms):
 #         as all-zero.
 #      b) Split the single BurpCoeffsA/BurpCoeffsB pair into two pairs --
 #         ExBurpCoeffsA/ExBurpCoeffsB (used when ExcitationShape is
-#         EBURP1/BURP) and RefBurpCoeffsA/RefBurpCoeffsB (used when
+#         EBURP1/BURP) and RefocusBurpCoeffsA/RefocusBurpCoeffsB (used when
 #         RefocusShape is REBURP/BURP) -- since E-BURP-1 and RE-BURP are
 #         different pulses with different coefficients; the previous
 #         single shared pair could not represent both at once.
 #      c) Pre-populated real defaults: ExBurpCoeffsA/B from Table 2's
 #         nmax=8 column (the most complete fit given in the paper),
-#         RefBurpCoeffsA from Table 8's Np=256 column (RefBurpCoeffsB left
+#         RefocusBurpCoeffsA from Table 8's Np=256 column (RefocusBurpCoeffsB left
 #         empty -- correctly so, see (a)). ExcitationShape/RefocusShape now
 #         default to 'EBURP1'/'REBURP' (previously 'GAUSSIAN'/'GAUSSIAN',
 #         used as a stand-in while coefficients were unavailable).

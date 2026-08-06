@@ -30,7 +30,7 @@
 #    Then here:
 #      1) Set PulseOffset to the Hz offset of your target peak (relative to
 #         SF+O1 -- see the PulseOffset Parameter description).
-#      2) With RefShape temporarily set to 'GAUSSIAN' or a very low
+#      2) With RefocusShape temporarily set to 'GAUSSIAN' or a very low
 #         RFAsh1 (i.e. effectively no refocusing), sweep RFAsh0 (or P90sh)
 #         and watch the acquired FID/spectrum amplitude to find the
 #         EXCITATION 90 condition (maximum signal for a simple pulse-
@@ -177,7 +177,7 @@ def generate_shape(shape_name, n_steps, burp_coeffs_A=None, burp_coeffs_B=None):
     fully self-contained.
 
     shape_name: 'GAUSSIAN', 'SINC', or 'EBURP1'/'REBURP'/'BURP' (needs
-    burp_coeffs_A -- see ExBurpCoeffsA/B, RefBurpCoeffsA/B Parameters)."""
+    burp_coeffs_A -- see ExBurpCoeffsA/B, RefocusBurpCoeffsA/B Parameters)."""
     shape_name = shape_name.upper()
 
     if shape_name == 'GAUSSIAN':
@@ -198,10 +198,10 @@ def generate_shape(shape_name, n_steps, burp_coeffs_A=None, burp_coeffs_B=None):
         if not burp_coeffs_A:
             raise ValueError(
                 "shape '{0}' requested but no Fourier A-coefficients were "
-                "supplied. EBURP1/REBURP are defined in Geen, H. & "
+                "supplied. EBURP1/REBURP are defined in Geen, H. &amp; "
                 "Freeman, R., J. Magn. Reson. 93, 93-141 (1991) as a "
                 "truncated Fourier series -- enter coefficients as "
-                "ExBurpCoeffsA/B or RefBurpCoeffsA/B, or use 'GAUSSIAN' / "
+                "ExBurpCoeffsA/B or RefocusBurpCoeffsA/B, or use 'GAUSSIAN' / "
                 "'SINC' instead, which need no coefficients."
                 .format(shape_name))
         tau = np.linspace(0.0, 1.0, n_steps, endpoint=False)
@@ -299,7 +299,7 @@ def parse_burp_coeffs(s):
 
 def db_to_relative_scale(dB, reference_relative_scale, convention='amplitude'):
     """Convert a dB-referenced RF power/amplitude figure (the units older
-    NMR literature -- including Geen & Freeman 1991 -- typically reports
+    NMR literature -- including Geen &amp; Freeman 1991 -- typically reports
     shaped-pulse power in) into an X-Pulse linear relative-scale value
     (0.0..1.0, the units Transmit1SetScale()/RFAsh0/RFAsh1 use).
 
@@ -451,13 +451,13 @@ class Parameters:
 
     # General acquisition
     FrequencyBase = Parameter("SF", 59.7, ParameterTypes.Double, "H/F Base Freq [MHz]")
-    FrequencyOffset = Parameter("O1", 0.0, ParameterTypes.Double, "H/F Freq Offset [Hz] -- overall sequence reference (affects BOTH the pulses and acquisition); leave at 0 (or your usual reference) and use PulseOffset below to target the selective pulses at a specific resonance")
+    FrequencyOffset = Parameter("O1", 0.0, ParameterTypes.Double, "H/F Freq Offset [Hz] -- ref. for pulse+acq; use PulseOffset to target the shaped pulses instead")
     TxPPM = Parameter("TxPPM", 0.0, ParameterTypes.Double, "H/F TX Freq Offset [ppm]")
     # THE clear, dedicated place to set the selective pulses' target
     # frequency -- see LWG_1D-Image-Echo-Selective_H.py's PulseOffset for
     # the full explanation. This is the parameter to SWEEP during
     # calibration to locate/tune the pulse's frequency response.
-    PulseOffset = Parameter("PulseOffset", 0.0, ParameterTypes.Double, "Selective-Pulse Frequency Offset [Hz] -- targets ONLY the shaped 90/180 pulses at (SF+O1+PulseOffset); acquisition stays referenced to SF+O1. Sweep this to find/calibrate your target resonance.")
+    PulseOffset = Parameter("PulseOffset", 0.0, ParameterTypes.Double, "Selective-Pulse Freq Offset [Hz] from SF+O1 (90/180 only, not acq) -- SWEEP to find target resonance")
 
     ReceiverPoints = Parameter("NP", 1024, ParameterTypes.Int32, "Acquisition Points")
     ReceiverAttenuation = Parameter("RA", 34, ParameterTypes.Int32, "RX Attenuation [0&#8230;77dB]")
@@ -476,23 +476,23 @@ class Parameters:
     # Shaped (chemical-shift-selective) pulses -- synthesised ON THE FLY
     # (see generate_shape()/shaped_pulse() above), no external shape file
     # needed. Default to the real literature pulses: EXCITATION = EBURP1
-    # (Geen & Freeman 1991, Table 2, nmax=8), REFOCUSING = REBURP (Table 8,
+    # (Geen &amp; Freeman 1991, Table 2, nmax=8), REFOCUSING = REBURP (Table 8,
     # Np=256).
-    ExcitationShape = Parameter("ExShape", "EBURP1", ParameterTypes.String, "Excitation (90) Shape [EBURP1 (default), GAUSSIAN, SINC, or BURP -- see ExBurpCoeffsA/B]")
-    RefocusShape = Parameter("RefShape", "REBURP", ParameterTypes.String, "Refocusing (180) Shape [REBURP (default), GAUSSIAN, SINC, or BURP -- see RefBurpCoeffsA/B]")
-    ExBurpCoeffsA = Parameter("ExBurpCoeffsA", "0.23,0.89,-1.02,-0.25,0.14,0.03,0.04,-0.03,0.00", ParameterTypes.String, "E-BURP-1 Fourier cosine coeffs A0..A8 (Geen & Freeman 1991, Table 2, nmax=8) -- used when ExShape=EBURP1/BURP")
-    ExBurpCoeffsB = Parameter("ExBurpCoeffsB", "0.00,-0.40,-1.42,0.74,0.06,0.03,-0.04,-0.02,0.01", ParameterTypes.String, "E-BURP-1 Fourier sine coeffs B0(unused)..B8 (Geen & Freeman 1991, Table 2, nmax=8) -- used when ExShape=EBURP1/BURP")
-    RefBurpCoeffsA = Parameter("RefBurpCoeffsA", "0.49,-1.02,1.11,-1.57,0.83,-0.42,0.26,-0.16,0.10,-0.07,0.04,-0.03,0.01,-0.02,0.00,-0.01", ParameterTypes.String, "RE-BURP Fourier cosine coeffs A0..A15 (Geen & Freeman 1991, Table 8, Np=256) -- used when RefShape=REBURP/BURP")
-    RefBurpCoeffsB = Parameter("RefBurpCoeffsB", "", ParameterTypes.String, "RE-BURP Fourier sine coeffs (none published -- RE-BURP is purely real; leave empty) -- used when RefShape=REBURP/BURP")
-    P90sh = Parameter("P90sh", 5000.0, ParameterTypes.Double, "Shaped 90&#176; Pulse Width [&#956;s] -- also sets the shape resolution (1 point/&#956;s). SWEEP THIS (or RFAsh0) to calibrate.")
-    P180sh = Parameter("P180sh", 10000.0, ParameterTypes.Double, "Shaped 180&#176; Pulse Width [&#956;s] -- also sets the shape resolution (1 point/&#956;s). SWEEP THIS (or RFAsh1) to calibrate.")
+    ExcitationShape = Parameter("ExShape", "EBURP1", ParameterTypes.String, "Excitation Shape [EBURP1(default)/GAUSSIAN/SINC/BURP]")
+    RefocusShape = Parameter("RefocusShape", "REBURP", ParameterTypes.String, "Refocusing Shape [REBURP(default)/GAUSSIAN/SINC/BURP]")
+    ExBurpCoeffsA = Parameter("ExBurpCoeffsA", "0.23,0.89,-1.02,-0.25,0.14,0.03,0.04,-0.03,0.00", ParameterTypes.String, "E-BURP-1 cosine coeffs A0..A8 (Geen&amp;Freeman'91 Tbl.2) -- used if ExShape=EBURP1/BURP")
+    ExBurpCoeffsB = Parameter("ExBurpCoeffsB", "0.00,-0.40,-1.42,0.74,0.06,0.03,-0.04,-0.02,0.01", ParameterTypes.String, "E-BURP-1 sine coeffs B0..B8 (Geen&amp;Freeman'91 Tbl.2) -- used if ExShape=EBURP1/BURP")
+    RefocusBurpCoeffsA = Parameter("RefocusBurpCoeffsA", "0.49,-1.02,1.11,-1.57,0.83,-0.42,0.26,-0.16,0.10,-0.07,0.04,-0.03,0.01,-0.02,0.00,-0.01", ParameterTypes.String, "RE-BURP cosine coeffs A0..A15 (Geen&amp;Freeman'91 Tbl.8) -- used if RefocusShape=REBURP/BURP")
+    RefocusBurpCoeffsB = Parameter("RefocusBurpCoeffsB", "", ParameterTypes.String, "RE-BURP sine coeffs (none published, purely real -- leave empty) -- used if RefocusShape=REBURP/BURP")
+    P90sh = Parameter("P90sh", 5000.0, ParameterTypes.Double, "Shaped 90&#176; Width [&#956;s] (=shape resolution, 1pt/&#956;s) -- SWEEP to calibrate")
+    P180sh = Parameter("P180sh", 10000.0, ParameterTypes.Double, "Shaped 180&#176; Width [&#956;s] (=shape resolution, 1pt/&#956;s) -- SWEEP to calibrate")
     # These are your calibration TARGETS -- start low and sweep upward
     # while watching the acquired signal (see design notes at top of file).
     TXAmplitude90 = Parameter("RFAsh0", 0.30, ParameterTypes.Double,
-                              "Shaped 90&#176; TX Power [0.0&#8230;1.0 of LP max] -- CALIBRATE via nutation (see design notes)", RFA, min=0.0, max=1.0)
+                              "Shaped 90&#176; TX Power [0&#8230;1 of LP max] -- SWEEP to calibrate", RFA, min=0.0, max=1.0)
     TXAmplitude180 = Parameter("RFAsh1", 0.30, ParameterTypes.Double,
-                               "Shaped 180&#176; TX Power [0.0&#8230;1.0 of LP max] -- CALIBRATE via nutation (see design notes)", RFA, min=0.0, max=1.0)
-    LPMaxFraction = Parameter("LPMaxFraction", 0.10, ParameterTypes.Double, "LP Port Max Power as Fraction of HP Port [0.0&#8230;1.0] -- your measured value, for reference/logging only")
+                               "Shaped 180&#176; TX Power [0&#8230;1 of LP max] -- SWEEP to calibrate", RFA, min=0.0, max=1.0)
+    LPMaxFraction = Parameter("LPMaxFraction", 0.10, ParameterTypes.Double, "LP Port Max as Fraction of HP [0&#8230;1] -- your measured value")
 
     # OPTIONAL power calculator -- OFF by default (PowerCalcMethod='manual'),
     # in which case RFAsh0/RFAsh1 above are used exactly as entered.
@@ -509,29 +509,29 @@ class Parameters:
     # Whichever method is used, VERIFY the result against a real nutation
     # curve (see design notes at top of file) before trusting it -- none of
     # these routes know your actual probe/coil/sample.
-    PowerCalcMethod = Parameter("PowerCalcMethod", "manual", ParameterTypes.String, "RFAsh0/RFAsh1 source: 'manual' (default, use as entered), 'shape' (RECOMMENDED -- calculate from hard-pulse calibration + shape integral), 'db' (legacy direct dB attenuation)")
-    RefAmplitude_HP = Parameter("RefAmplitude_HP", 0.40, ParameterTypes.Double, "Reference HARD-pulse relative amplitude on the HIGH-power port for a KNOWN, calibrated flip angle (e.g. your normal RFA0) -- used if PowerCalcMethod='shape' or 'db'")
-    HardPulseWidth = Parameter("P1Hard", 9.58, ParameterTypes.Double, "Reference HARD 90&#176; pulse width [&#956;s] at RefAmplitude_HP on the HIGH-power port (your normal calibrated hard pulse, e.g. P90 from a simple pulse-acquire) -- only used if PowerCalcMethod='shape'")
-    ExcitationRotation = Parameter("ExRotation", 90.0, ParameterTypes.Double, "Target rotation of the EXCITATION shape [&#176;] (E-BURP-1 = 90) -- only used if PowerCalcMethod='shape'")
-    RefocusRotation = Parameter("RefRotation", 180.0, ParameterTypes.Double, "Target rotation of the REFOCUSING shape [&#176;] (RE-BURP = 180) -- only used if PowerCalcMethod='shape'")
-    PowerAdjust_dB = Parameter("PowerAdjust_dB", 0.0, ParameterTypes.Double, "Manual fine-tune [dB, amplitude convention] applied on top of the 'shape' calculation -- equivalent to the Bruker macro's cnst0. Use AFTER checking a real nutation curve, not as a first guess. Only used if PowerCalcMethod='shape'")
-    Excitation_dB = Parameter("Excitation_dB", 0.0, ParameterTypes.Double, "Excitation-pulse power, as dB ATTENUATION relative to RefAmplitude_HP (positive = less power) -- only used if PowerCalcMethod='db'")
-    Refocus_dB = Parameter("Refocus_dB", 0.0, ParameterTypes.Double, "Refocusing-pulse power, as dB ATTENUATION relative to RefAmplitude_HP (positive = less power) -- only used if PowerCalcMethod='db'")
-    DbConvention = Parameter("DbConvention", "amplitude", ParameterTypes.String, "dB convention: 'amplitude' (B1/voltage, usual NMR convention) or 'power' (deposited power) -- CHECK your source uses the same one; only used if PowerCalcMethod='db'")
+    PowerCalcMethod = Parameter("PowerCalcMethod", "manual", ParameterTypes.String, "RFAsh0/RFAsh1 source: manual(default)/shape(recommended)/db")
+    RefAmplitude_HP = Parameter("RefAmplitude_HP", 0.40, ParameterTypes.Double, "Ref. hard-pulse rel. amplitude [0&#8230;1] on HP port, known flip angle -- for shape/db methods")
+    HardPulseWidth = Parameter("P1Hard", 9.58, ParameterTypes.Double, "Ref. hard 90&#176; width [&#956;s] at RefAmplitude_HP on HP port -- for 'shape' method")
+    ExcitationRotation = Parameter("ExRotation", 90.0, ParameterTypes.Double, "Target rotation of excitation shape [&#176;] (EBURP1=90) -- for 'shape' method")
+    RefocusRotation = Parameter("RefocusRotation", 180.0, ParameterTypes.Double, "Target rotation of refocusing shape [&#176;] (REBURP=180) -- for 'shape' method")
+    PowerAdjust_dB = Parameter("PowerAdjust_dB", 0.0, ParameterTypes.Double, "Manual fine-tune [dB] on top of 'shape' calc -- set AFTER nutation check")
+    Excitation_dB = Parameter("Excitation_dB", 0.0, ParameterTypes.Double, "Excitation power as dB attenuation vs RefAmplitude_HP (+ve=less power) -- for 'db' method")
+    Refocus_dB = Parameter("Refocus_dB", 0.0, ParameterTypes.Double, "Refocusing power as dB attenuation vs RefAmplitude_HP (+ve=less power) -- for 'db' method")
+    DbConvention = Parameter("DbConvention", "amplitude", ParameterTypes.String, "dB convention: amplitude(B1,usual)/power -- check your source; for 'db' method")
 
     # Echo timing -- no gradients here, so Tau only needs to comfortably
     # clear the shaped pulses themselves (no PreGrad/GradSettle margin
     # needed, unlike the imaging version).
-    Tau = Parameter("TAU", 20000, ParameterTypes.Int32, "Echo &#964; Delay [&#956;s] -- must comfortably exceed P90sh/2 + P180sh")
+    Tau = Parameter("TAU", 20000, ParameterTypes.Int32, "Echo &#964; Delay [&#956;s] -- must exceed P90sh/2 + P180sh")
 
     # Mains-lock trigger -- OFF by default (see mains_lock_trigger()
     # docstring). Included here for consistency with the rest of the pp
     # family, even though this isn't an imaging sequence.
-    UseMainsLock = Parameter("UseMainsLock", 0, ParameterTypes.Int32, "Emit Mains-Lock Trigger Before Sequence [0=Off(default),1=On]")
-    MainsLockChannel = Parameter("MainsLockChannel", 2, ParameterTypes.Int32, "Mains-Lock ExternalTrigger Channel [1-3, unconfirmed for X-Pulse -- see manual 3.7.19]")
+    UseMainsLock = Parameter("UseMainsLock", 0, ParameterTypes.Int32, "Mains-Lock Trigger Before Sequence [0=Off(default),1=On]")
+    MainsLockChannel = Parameter("MainsLockChannel", 2, ParameterTypes.Int32, "Mains-Lock Trigger Channel [1-3, unconfirmed for X-Pulse]")
 
     # Duty-cycle guard rail (RF only -- no gradients in this sequence)
-    MaxRFDuty = Parameter("MaxRFDuty", 0.05, ParameterTypes.Double, "Max RF Duty Cycle Warning Threshold [0.0&#8230;1.0]")
+    MaxRFDuty = Parameter("MaxRFDuty", 0.05, ParameterTypes.Double, "Max RF Duty Cycle Warning Threshold [0&#8230;1]")
 
     # Phases (simple 2-step)
     PH1 = Parameter("PH1", "0,180", ParameterTypes.String, "Shaped 90&#176; Pulse Phase")
@@ -566,8 +566,8 @@ def run(comms):
 
     ExBurpA = parse_burp_coeffs(P.ExBurpCoeffsA)
     ExBurpB = parse_burp_coeffs(P.ExBurpCoeffsB)
-    RefBurpA = parse_burp_coeffs(P.RefBurpCoeffsA)
-    RefBurpB = parse_burp_coeffs(P.RefBurpCoeffsB)
+    RefocusBurpA = parse_burp_coeffs(P.RefocusBurpCoeffsA)
+    RefocusBurpB = parse_burp_coeffs(P.RefocusBurpCoeffsB)
 
     # ---- Optional power calculator override -----------------------------
     RFAsh0_effective = P.TXAmplitude90
@@ -581,23 +581,23 @@ def run(comms):
         # numpy calculation, no hardware instructions, so calling it here
         # ahead of the scan loop is free and has no side effects.
         ExAmpProfile, _ = generate_shape(P.ExcitationShape, max(4, int(round(P.P90sh))), ExBurpA, ExBurpB)
-        RefAmpProfile, _ = generate_shape(P.RefocusShape, max(4, int(round(P.P180sh))), RefBurpA, RefBurpB)
+        RefocusAmpProfile, _ = generate_shape(P.RefocusShape, max(4, int(round(P.P180sh))), RefocusBurpA, RefocusBurpB)
         ExIntegFactor = shape_integration_factor(ExAmpProfile)
-        RefIntegFactor = shape_integration_factor(RefAmpProfile)
+        RefocusIntegFactor = shape_integration_factor(RefocusAmpProfile)
         RFAsh0_effective = estimate_shape_relative_scale(
             P.HardPulseWidth, P.RefAmplitude_HP, P.P90sh, P.ExcitationRotation,
             ExIntegFactor, P.LPMaxFraction, P.PowerAdjust_dB)
         RFAsh1_effective = estimate_shape_relative_scale(
             P.HardPulseWidth, P.RefAmplitude_HP, P.P180sh, P.RefocusRotation,
-            RefIntegFactor, P.LPMaxFraction, P.PowerAdjust_dB)
+            RefocusIntegFactor, P.LPMaxFraction, P.PowerAdjust_dB)
         comms.log("PowerCalcMethod='shape': excitation integ.factor={0:.4f} "
                   "-> RFAsh0={1:.4f}; refocus integ.factor={2:.4f} -> "
                   "RFAsh1={3:.4f} (hard-pulse ref P1Hard={4}us @ "
-                  "RefAmplitude_HP={5}, ExRotation={6}deg, RefRotation="
+                  "RefAmplitude_HP={5}, ExRotation={6}deg, RefocusRotation="
                   "{7}deg, LPMaxFraction={8:.2%}, PowerAdjust_dB={9:.2f}). "
                   "(Parameter-panel RFAsh0/RFAsh1 are ignored while "
                   "PowerCalcMethod='shape'.)"
-                  .format(ExIntegFactor, RFAsh0_effective, RefIntegFactor,
+                  .format(ExIntegFactor, RFAsh0_effective, RefocusIntegFactor,
                           RFAsh1_effective, P.HardPulseWidth, P.RefAmplitude_HP,
                           P.ExcitationRotation, P.RefocusRotation,
                           P.LPMaxFraction, P.PowerAdjust_dB))
@@ -605,7 +605,7 @@ def run(comms):
             comms.log("WARNING: calculated relative scale exceeds 1.0 (LP "
                       "port cannot go higher than its own max) -- "
                       "RFAsh0_effective={0:.4f}, RFAsh1_effective={1:.4f}. "
-                      "Check P1Hard/RefAmplitude_HP/ExRotation/RefRotation/"
+                      "Check P1Hard/RefAmplitude_HP/ExRotation/RefocusRotation/"
                       "LPMaxFraction.".format(RFAsh0_effective, RFAsh1_effective))
 
     elif PowerMethod == 'db':
@@ -701,7 +701,7 @@ def run(comms):
             safe_delay(P.Tau - ExcitationPulseWidth/2 - RefocusPulseWidth/2.0,
                        "first-TAU wait", comms)
             # Shaped 180 (refocusing) pulse
-            shaped_pulse(P.P180sh, ph["PH2"], P.RefocusShape, RFAsh1_effective, P.TXEnableTime, Frequency, P.PulseOffset, RefBurpA, RefBurpB)
+            shaped_pulse(P.P180sh, ph["PH2"], P.RefocusShape, RFAsh1_effective, P.TXEnableTime, Frequency, P.PulseOffset, RefocusBurpA, RefocusBurpB)
             # TAU -- ReceiverFilter.dead_time is reserved out of this wait
             # and paid back explicitly (as its own Delay, right before
             # Receiver1 below) rather than left out entirely.
@@ -739,7 +739,7 @@ def run(comms):
 # 2. Claude - 04/08/26 - dB POWER CALCULATOR: added db_to_relative_scale()/
 #    db_to_lp_relative_scale() and an opt-in UseDbCalc/RefAmplitude_HP/
 #    Excitation_dB/Refocus_dB/DbConvention Parameter group, per your
-#    request to bridge Geen & Freeman's dB-based power figures to the
+#    request to bridge Geen &amp; Freeman's dB-based power figures to the
 #    X-Pulse's linear relative-power scale. I do NOT have the paper's
 #    specific dB table (you gave me the Fourier coefficient tables, not a
 #    power table), so this is general-purpose machinery for YOUR OWN dB
@@ -760,11 +760,11 @@ def run(comms):
 #    renamed/generalised to PowerCalcMethod, a 3-way string selector, still
 #    defaulting to 'manual' so nothing changes unless you opt in). Needs
 #    only your existing hard-pulse calibration (P1Hard/RefAmplitude_HP) and
-#    each shape's target rotation (ExRotation=90/RefRotation=180 by
+#    each shape's target rotation (ExRotation=90/RefocusRotation=180 by
 #    default, matching E-BURP-1/RE-BURP) -- the shape's own integration
 #    factor is computed directly from the SAME synthesised envelope
 #    shaped_pulse() uses to drive the hardware, not looked up from a table,
-#    so this needs none of Geen & Freeman's literature dB figures. Kept the
+#    so this needs none of Geen &amp; Freeman's literature dB figures. Kept the
 #    legacy 'db' route (previously UseDbCalc=1) available for anyone who
 #    already has a dB attenuation figure not derived from a hard-pulse
 #    ratio. PowerAdjust_dB (equivalent to the Bruker macro's cnst0) is
