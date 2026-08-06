@@ -50,3 +50,12 @@ This repo already has genuine *reference*-value parameters (`RefAmplitude_HP`, `
 ## 5. Naming symmetry
 
 Keep a Parameter's Python attribute name and its SpinFlow-facing string key either identical or at least non-misleading relative to each other — don't let them drift apart the way `RefocusShape = Parameter("RefShape", ...)` did (clear in Python, ambiguous in SpinFlow). If you rename one, rename the other to match.
+
+## 6. Check units at every arithmetic combination of two Parameters — a zero default can hide a real bug for months
+
+Real bug found 06/08/2026, present in every `shaped_pulse()`-using file since the shaped-pulse machinery was first written: `Frequency` (the sequence's base frequency) is computed and always carried in **MHz** (`P.FrequencyBase + P.FrequencyOffset*1.0e-6 + ...` — note `FrequencyOffset`, a Hz-valued Parameter, is correctly converted with `*1.0e-6` before being added). But `shaped_pulse()`'s hardware call added `base_frequency + pulse_offset` directly — `pulse_offset` (from the `PulseOffset` Parameter) is in **Hz**, un-converted. A 500 Hz offset silently became `59.7 MHz + 500 = 559.7` "MHz", far outside the hardware's valid range, and the sequence failed to initialize with a completely generic, unrelated-looking error (`RuntimeError: Sequence init failed.`) deep inside the firmware/broker layer — nothing in the Python traceback pointed at a units mismatch.
+
+This bug was invisible for as long as `PulseOffset` stayed at its default of `0.0` (0 Hz still equals 0 MHz, so the missing conversion never mattered) — it only surfaced the first time someone actually followed the documented calibration procedure and set a real, nonzero offset. **A default of 0 on either operand of an addition/subtraction is not evidence the units are consistent — it just means the bug hasn't been exercised yet.**
+
+- Whenever two Parameters (or a Parameter and a hardware call's fixed argument) are combined arithmetically, explicitly check they're in the same unit before combining, and comment the conversion inline if one is needed (see the `pulse_offset*1.0e-6` fix for the exact style).
+- Don't trust "it worked in testing" as proof a formula is unit-correct if every test happened to use a zero/default value for one of the operands. Test with a real nonzero value for every Parameter that's supposed to matter before considering a sequence validated.

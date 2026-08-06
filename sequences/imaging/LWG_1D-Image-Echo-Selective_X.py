@@ -337,7 +337,8 @@ def shaped_pulse(duration, phase, shape, amplitude, txenabletime,
     modulating amplitude+phase instead of amplitude+frequency.
 
     base_frequency / pulse_offset: the RF carrier is set to
-    (base_frequency + pulse_offset) for the duration of THIS shaped pulse
+    (base_frequency + pulse_offset*1e-6, i.e. pulse_offset [Hz] converted
+    to MHz before adding to base_frequency [MHz]) for the duration of THIS shaped pulse
     ONLY, then restored to base_frequency immediately afterward. This keeps
     acquisition referenced to a stable base_frequency (SF+O1) while the
     selective pulse itself targets an independently-tunable PulseOffset --
@@ -358,7 +359,12 @@ def shaped_pulse(duration, phase, shape, amplitude, txenabletime,
                           .format(duration))
     amp_profile, phase_profile = generate_shape(shape, n_steps, burp_coeffs_A, burp_coeffs_B)
 
-    Channel2SetFrequency(1, base_frequency + pulse_offset)
+    # pulse_offset is in Hz (see PulseOffset Parameter); base_frequency
+    # is in MHz -- *1.0e-6 converts Hz->MHz before adding. Omitting this
+    # conversion sends the synth a frequency off by ~1e6x whenever
+    # PulseOffset != 0, which fails hardware init (a real bug fixed
+    # 06/08/2026 -- it was invisible with PulseOffset=0, the default).
+    Channel2SetFrequency(1, base_frequency + pulse_offset*1.0e-6)
     Transmit2SetScale(5, amplitude)
     Channel2SetBasePhase(5, phase)
     Transmit2BlankingOn(1)

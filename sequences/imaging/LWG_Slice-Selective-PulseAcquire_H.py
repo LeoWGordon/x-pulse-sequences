@@ -315,7 +315,12 @@ def shaped_pulse(duration, phase, shape, amplitude, txenabletime,
                           .format(duration))
     amp_profile, phase_profile = generate_shape(shape, n_steps, burp_coeffs_A, burp_coeffs_B)
 
-    Channel1SetFrequency(1, base_frequency + pulse_offset)
+    # pulse_offset is in Hz (see PulseOffset Parameter); base_frequency
+    # is in MHz -- *1.0e-6 converts Hz->MHz before adding. Omitting this
+    # conversion sends the synth a frequency off by ~1e6x whenever
+    # PulseOffset != 0, which fails hardware init (a real bug fixed
+    # 06/08/2026 -- it was invisible with PulseOffset=0, the default).
+    Channel1SetFrequency(1, base_frequency + pulse_offset*1.0e-6)
     Transmit1SetScale(5, amplitude)
     Channel1SetBasePhase(5, phase)
     Transmit1BlankingOn(1)
