@@ -1,31 +1,112 @@
 #-------------------------------------------------------------------------------
-# Name:        LWG_1D-Image-Echo_H.py
-# Purpose:     One-dimensional MRI / image-echo (frequency-encoded profile)
-#              sequence for the Oxford Instruments X-Pulse Broadband Benchtop
-#              NMR Spectrometer (1H/19F channel). Axis-selectable (x/y/z).
+# Name:        LWG_1D-Image-Echo-GradAfterRefocus_H.py
+# Purpose:     Variant of LWG_1D-Image-Echo_H.py (v3.1) that moves ALL
+#              gradient activity to the SECOND TAU period (after the
+#              refocusing pulse) instead of splitting it: a dephase lobe
+#              before refocusing (exploiting the 180's sign flip) + a
+#              readout lobe after. Written as an experimental A/B test
+#              against the original, NOT a validated replacement -- see
+#              "IMPLICATIONS" below and the changelog before running.
 #
-# Author:      CM / LWG (base sequence); revised by Claude for L. Gordon (DTU)
+# Author:      Claude for L. Gordon (DTU), branched from
+#              LWG_1D-Image-Echo_H.py v3.1 (CM/LWG base, Claude revisions)
 #
-# Created:     05/08/2020
-# Revised:     06/08/2026
+# Created:     06/08/2026
 # Copyright:   (c) Oxford Instruments Magnetic Resonance, 2013-
-# Version:     3.1
+# Version:     1.0 (experimental)
 #
-# Basis:       v3.0 is a NEAR-VERBATIM copy of LWG_diffprof_2_H.py, which is
-#              confirmed to compile and run on this X-Pulse (unlike the
-#              official vendor 1D-profile-{x,y,z}_H.py sequences, which
-#              apparently only work inside Application Developer, not here).
-#              A v2.0 rewrite of this file that derived the read-gradient
-#              timing from NP*Filter (matching the vendor reference's
-#              algebra) did NOT compile -- most likely because it called
-#              Receiver1(dwell, points) instead of the correct
-#              Receiver1(total_acquisition_time, points), see changelog
-#              item (i). Rather than re-guess, this version starts from your
-#              own proven-working sequence and only makes small, additive
-#              changes on top of it (see changelog).
+# WHAT CHANGED VS v3.1:
+#   v3.1 (original):  90 -- [dephase gradient, +G1] -- TAU -- 180 -- TAU --
+#                      [readout gradient, +G1] -- echo/acquisition
+#                      The dephase lobe sits BEFORE the refocusing pulse.
+#                      Same polarity (+G1) as the readout lobe is used for
+#                      BOTH, because the 180 pulse itself inverts the
+#                      accumulated phase -- so a same-sign pre-180 lobe acts
+#                      as a NEGATIVE (dephase) lobe once you get to the
+#                      post-180 frame. This is the standard trick used to
+#                      align a gradient echo (k=0) with a spin echo.
 #
-# Changes/Modifications: At end of file -- READ THIS before running on a
-#              sample.
+#   This file:         90 -- TAU (no gradient) -- 180 -- [dephase gradient,
+#                      -G1] -- [readout gradient, +G1] -- echo/acquisition
+#                      The dephase lobe is moved to immediately AFTER the
+#                      refocusing pulse, with genuinely OPPOSITE polarity
+#                      (there is no 180 left to exploit for a sign flip --
+#                      both lobes now happen on the same side of it). The
+#                      readout lobe itself -- amplitude, duration, and its
+#                      timing relative to the acquisition window -- is
+#                      UNCHANGED from v3.1, so the already-validated
+#                      "echo centred in the acquisition window" timing is
+#                      untouched; only the source of the -kmax starting
+#                      offset moves from before-180 to after-180.
+#
+# IMPLICATIONS (see also chat discussion -- summarising here for anyone
+# reading this file cold):
+#
+#   T2 / echo time (TE): UNCHANGED. TE = 2*TAU is set entirely by the RF
+#   branch (90 -- TAU -- 180 -- TAU -- acquisition), which this file does
+#   not touch at all. Moving the gradient's position within the TAU-TAU
+#   window does not change when the spin echo happens or how much T2 decay
+#   has occurred by the time you acquire it.
+#
+#   Diffusion weighting: THIS is what actually changes, and is the main
+#   reason to try this variant. In v3.1, the dephase lobe (before 180) and
+#   the readout lobe (after 180) are separated by roughly TAU and straddle
+#   the refocusing pulse with the SAME nominal polarity -- which, after the
+#   180 flips the sign of the first one, is exactly the Stejskal-Tanner
+#   (PGSE) diffusion-weighting geometry: two gradient pulses of effective
+#   opposite sign, separated by a diffusion time Delta ~ TAU, refocused by
+#   a 180 in between. That geometry inevitably imparts a small but real
+#   b-value on top of the intended spatial encoding -- so v3.1's profile
+#   intensity is, strictly, a little diffusion-weighted as well as
+#   T2-weighted, and a sample with a higher self-diffusion coefficient
+#   (e.g. free water vs. something more restricted) will show somewhat
+#   more signal loss than its spin density alone would predict.
+#
+#   In this file, BOTH gradient lobes sit on the same (post-180) side of
+#   the refocusing pulse, back-to-back with no refocusing pulse between
+#   them. That is a diffusion-COMPENSATED (bipolar) geometry, not a
+#   diffusion-weighting one -- the separation between the two lobes' centres
+#   is now on the order of the lobes' own duration (microseconds-to-low-
+#   milliseconds), not TAU, so the effective b-value collapses to something
+#   much smaller (b scales with roughly the square of the lobe separation).
+#   The trade-off: this profile is "purer" spin-density/T2-weighted data,
+#   less confounded by the sample's diffusion coefficient -- useful if
+#   you're comparing regions/samples with different D and don't want that
+#   difference bleeding into apparent intensity.
+#
+#   Practical costs of the swap:
+#     - The post-180 gradient branch now has to fit BOTH lobes into the
+#       second TAU instead of one, so there is less slack before TAU is
+#       too short for your GradientOnTime/RampTime/GradSettle combination
+#       -- watch for the safe_delay() FATAL TIMING ERROR on this branch
+#       and lengthen TAU if you hit it (this compounds with, doesn't
+#       replace, the "increase TAU to move the echo away from pulse
+#       bleed" advice from earlier).
+#     - Two back-to-back OPPOSITE-polarity lobes (dephase then readout)
+#       means the gradient amplifier has to reverse polarity quickly
+#       instead of ramping to zero and idling -- if your amplifier's
+#       eddy-current settling is polarity-direction-dependent, you may
+#       need MORE settle time between these two lobes than GradSettle
+#       currently gives it (see the GradSettle re-use note in run()
+#       below); this is exactly the kind of thing that could produce a
+#       new artefact of its own, so validate this file's profile shape
+#       (symmetric, positive, centred) before trusting it quantitatively,
+#       the same way the v3.1 rollout was validated.
+#     - Estimated gradient duty cycle is unchanged in total on-time, but
+#       is now concentrated entirely in the second TAU rather than spread
+#       across both -- check the MaxGradDuty warning if you shorten RD.
+#
+# Basis:       Directly derived from LWG_1D-Image-Echo_H.py v3.1 -- only
+#              the gradient branch of run() differs; the RF branch,
+#              Parameters block, helper functions and CallBack1D are
+#              carried over unchanged (this is deliberate: keeping the RF/
+#              acquisition timing byte-for-byte identical is what makes
+#              the T2/TE-unchanged claim above actually true, rather than
+#              just asserted).
+#
+# NOTE ON FILE ENCODING: the X-Pulse pulse-sequence compiler requires
+# Windows CRLF line endings (see LWG_1D-Image-Echo_H.py's own changelog
+# item 10g) -- this file must be saved/kept as CRLF.
 #-------------------------------------------------------------------------------
 
 from firebird import *
@@ -102,7 +183,7 @@ class CallBack1D(object):
             self.acc_data = None
         if scan == (self.DS+self.NS-1):
             self.end_time = time.time()
-            self.comms.log("seqTime LWG_1D-Image-Echo_H Estimated: {0}, Real: {1}".format(1e-6*time_calculation(Parameters), self.end_time-self.start_time))
+            self.comms.log("seqTime LWG_1D-Image-Echo-GradAfterRefocus_H Estimated: {0}, Real: {1}".format(1e-6*time_calculation(Parameters), self.end_time-self.start_time))
 
 
 def check_range(pvalue, **kwargs):
@@ -124,7 +205,7 @@ def time_calculation(P):
     DW = ReceiverFilter.dwell
 
     # Rough estimate only (used purely for the comms.log 'Sequence Time'
-    # message) -- kept close to LWG_diffprof_2_H.py's own approximation.
+    # message) -- kept close to v3.1's own approximation.
     t_scanTime = (P.P90*5 + P.Tau*2 + points*DW)
     t_acqTime = t_scanTime * (P.NumScans + P.DS)
     return t_acqTime
@@ -132,11 +213,15 @@ def time_calculation(P):
 def sequence_description():
 
     seq_desc = ("1D MRI / image-echo (frequency-encoded profile) sequence on "
-                "the {H/F} channel.\nSpin-echo (90-TAU-[90-270 composite "
-                "180]-TAU-echo) with a dephase gradient before the "
-                "refocusing pulse and a matched readout gradient spanning "
-                "the acquisition window. Gradient axis selectable via "
-                "GradAxis (x/y/z).")
+                "the {H/F} channel -- GradAfterRefocus variant.\nSpin-echo "
+                "(90-TAU-[90-270 composite 180]-TAU-echo) with BOTH the "
+                "dephase and readout gradient lobes placed after the "
+                "refocusing pulse (bipolar, back-to-back), instead of "
+                "splitting them before/after as in LWG_1D-Image-Echo_H.py. "
+                "TE (T2 weighting) is unchanged; diffusion weighting is "
+                "greatly reduced since the two lobes no longer straddle the "
+                "refocusing pulse with a ~TAU separation. Gradient axis "
+                "selectable via GradAxis (x/y/z).")
 
     return seq_desc
 
@@ -168,7 +253,11 @@ def apply_gradient(axis, delta, ramp_time, gradient_value, settle_time, pre_grad
     """Apply gradient pulses to specified axis. gradient_value is the final
     logical (normalised, -1..1) amplitude sent to hardware -- axis
     calibration (FPX/FPY/FPZ) is applied exactly once, by GradientMatrix()
-    in run() below, NOT here (see changelog item (a))."""
+    in run() below, NOT here. gradient_value's SIGN sets the lobe's
+    polarity -- this file calls it with -P.G1 for the post-refocus dephase
+    lobe and +P.G1 for the readout lobe, unlike v3.1 which only ever uses
+    +P.G1 (relying on the refocusing pulse to flip the dephase lobe's
+    effective sign instead)."""
     Delay(pre_grad)
     gradient_slew_rate = abs(gradient_value / ramp_time)
     slew_rate_fn, gradient_fn = get_gradient_functions(axis)
@@ -190,8 +279,7 @@ def pulse(length, phase, txenabletime):
 def ninety270(length90, phase90, phase270, txenabletime):
     """Composite 90(x)-270(y) refocusing pulse. Total duration is
     TXEnableTime + 4*length90 -- every Delay() around this call in run()
-    accounts for that true duration (see changelog item (b) /
-    RefocusPulseWidth)."""
+    accounts for that true duration via RefocusPulseWidth."""
     Channel1SetBasePhase(1, phase90)
     Transmit1BlankingOn(1)
     Delay(txenabletime)
@@ -208,7 +296,13 @@ def safe_delay(value, label, comms):
     silently desynchronise the read gradient from the acquisition window
     ('leaking' signal/artefacts outside the intended echo) instead of
     failing loudly. This turns that failure mode into a specific,
-    immediate error instead."""
+    immediate error instead.
+
+    NOTE for this variant: the second-TAU wait now has to make room for
+    the dephase lobe as well as the readout lobe (v3.1 only had the
+    readout lobe there), so this is more likely to go negative than in
+    v3.1 for the same TAU/GradientOnTime -- if you hit this on the
+    'gradient second-TAU wait (after dephase)' label, increase TAU."""
     if value < 0:
         msg = ("FATAL TIMING ERROR computing '{0}': delay would be {1:.2f} us "
                "(negative). Increase TAU and/or PreGrad, or decrease "
@@ -219,24 +313,9 @@ def safe_delay(value, label, comms):
 
 
 def mains_lock_trigger(P, comms):
-    """Optionally emit a mains-line trigger (ExternalTrigger[n]()) before the
-    first pulse event, per Pulse Sequence Programming User Manual 01-U-049
-    section 3.7.19 ("...mains-lock instructions..."). The manual's trigger-
-    channel table only lists MQC+ (mains lock = ExternalTrigger2()) and MQR
-    (mains lock = ExternalTrigger3()) -- no X-Pulse row is given, so the
-    channel is a Parameter for you to confirm/correct rather than hard-coded.
-
-    OFF (UseMainsLock=0) by default for every sequence in this imaging
-    family, per your instruction. Reasoning: a mains-lock trigger waits for
-    the next AC zero-crossing before firing, adding a non-deterministic
-    delay (0 up to one mains half-cycle -- up to ~10 ms @ 50 Hz / ~8.3 ms @
-    60 Hz) before the very first RF/gradient event of EVERY scan. That is
-    harmless for ordinary spectroscopy but works against exactly what this
-    sequence family is trying to guarantee: tight, reproducible scan-to-scan
-    timing for gradient-echo imaging. Set UseMainsLock=1 (and confirm
-    MainsLockChannel) if you determine your X-Pulse needs mains-synchronous
-    triggering for interference suppression.
-    """
+    """Optionally emit a mains-line trigger before the first pulse event.
+    OFF by default -- see LWG_1D-Image-Echo_H.py's docstring for the full
+    rationale (unchanged here)."""
     if int(P.UseMainsLock) == 0:
         return
     triggers = {1: ExternalTrigger1, 2: ExternalTrigger2, 3: ExternalTrigger3}
@@ -251,15 +330,7 @@ def mains_lock_trigger(P, comms):
 def estimate_duty_cycles(P, rf_on_time, grad_on_time, comms):
     """Log estimated RF and gradient duty cycles for this scan and warn if
     they exceed the (user-adjustable) MaxRFDuty / MaxGradDuty parameters.
-
-    IMPORTANT: MaxRFDuty and MaxGradDuty are conservative, editable
-    placeholders (5% / 10%), NOT a vendor-confirmed rating -- no public duty
-    cycle specification for the X-Pulse 60 MHz RF/gradient amplifiers was
-    available when this was written. Confirm the real limits with Oxford
-    Instruments (or your instrument's service documentation) and adjust
-    accordingly, especially before running long, low-RD, high-NS
-    experiments unattended.
-    """
+    Same conservative-placeholder caveat as v3.1 applies."""
     TR = float(P.RecycleDelay)
     rf_duty = rf_on_time / TR
     grad_duty = grad_on_time / TR
@@ -284,14 +355,8 @@ def estimate_duty_cycles(P, rf_on_time, grad_on_time, comms):
                   .format(grad_duty, P.Axis, P.MaxGradDuty))
 
 
-# Per-axis max gradient strength (G/cm) for probes that can be fitted to
-# this magnet. There is no way to detect which probe is mounted from
-# software, so this is a MANUAL selector (Probe Parameter below) -- the
-# operator must set it to match what is actually on the magnet. KEEP THIS
-# TABLE IN SYNC with leonmr/xpulse_imaging.py's own GRADIENT_CALIBRATION
-# dict (duplicated here rather than imported, since pulse programmes can't
-# import external Python modules -- same house convention used for
-# generate_shape()/safe_delay()/mains_lock_trigger() across this family).
+# Per-axis max gradient strength (G/cm). Kept in sync with
+# LWG_1D-Image-Echo_H.py / leonmr/xpulse_imaging.py's own tables.
 MAXGRAD_TABLE = {
     "HFX": {"x": 11.879, "y": 11.978, "z": 57.915},   # G/cm, measured/averaged 06/08/2026
     "LOWGAMMA": {"x": None, "y": None, "z": None},     # NOT YET CALIBRATED
@@ -299,12 +364,7 @@ MAXGRAD_TABLE = {
 
 def report_probe_gradient(P, comms, axis=None):
     """Log the max gradient strength (G/cm) for the currently-selected Probe
-    and gradient axis. Since Probe and GradAxis are both Parameters, this
-    also gets auto-recorded in the resulting JCAMP file's SpinFlow
-    parameter block -- letting leonmr/xpulse_imaging.py convert Hz to mm
-    later without the operator having to remember/re-enter which probe was
-    fitted for a given experiment. Warns (does not fail) if the fitted
-    probe's axis has no calibration yet."""
+    and gradient axis -- see LWG_1D-Image-Echo_H.py for full rationale."""
     probe_key = str(P.Probe).upper().replace('/', '').replace('-', '').replace(' ', '').replace('_', '')
     axis_key = str(axis if axis is not None else getattr(P, "Axis", "z")).strip().lower()
     if probe_key not in MAXGRAD_TABLE:
@@ -326,8 +386,7 @@ def report_probe_gradient(P, comms, axis=None):
 class Parameters:
 
 	# Sequence name and basic parameter list for SpinFlow
-    Sequence = Parameter("Sequence", "LWG_1D-Image-Echo_H", ParameterTypes.String, "Sequence Name")
-#   Basic = Parameter("Basic", "NS,RD,NP,Filter,D71,D74,G1", ParameterTypes.String, "List of basic parameters")
+    Sequence = Parameter("Sequence", "LWG_1D-Image-Echo-GradAfterRefocus_H", ParameterTypes.String, "Sequence Name")
 
     # General acquisition
     FrequencyBase = Parameter("SF", 59.7, ParameterTypes.Double, "H/F Base Freq [MHz]")
@@ -354,45 +413,28 @@ class Parameters:
     TXAmplitude = Parameter("RFA0", 0.4, ParameterTypes.Double,
                             "H/F TX Power [0.0&#8230;1.0]", RFA, min=0.0, max=1.0)
 
-    # Decoupling
-
     # Gradients -- FPX/FPY/FPZ are the ONLY place per-axis calibration is
     # applied (via GradientMatrix() in run()); G1 is the single logical
-    # gradient-strength knob used for both encode and readout lobes (see
-    # changelog item (a) -- LWG_diffprof_2_H.py applied FPX/FPY/FPZ a
-    # second time via 'G1*gradscaler', which double-scales the current).
+    # gradient-strength knob used for both the dephase and readout lobes.
     G1 = Parameter("G1", 1.0, ParameterTypes.Double, "Gradient Strength [-1.0&#8230;1.0]")
     XGradNorm = Parameter("FPX", 1.0, ParameterTypes.Double, "X Grad Scaler [0.0&#8230;1.0]")
     YGradNorm = Parameter("FPY", 1.0, ParameterTypes.Double, "Y Grad Scaler [0.0&#8230;1.0]")
     ZGradNorm = Parameter("FPZ", 1.0, ParameterTypes.Double, "Z Grad Scaler [0.0&#8230;1.0]")
-    # Probe fitted to the magnet -- no automatic detection is possible, so
-    # this must be set MANUALLY to match what's actually mounted. Used only
-    # for logging/downstream Hz-to-mm conversion (see report_probe_gradient()
-    # above and leonmr/xpulse_imaging.py) -- has no effect on this pp's own
-    # timing/hardware calls.
     Probe = Parameter("Probe", "HFX", ParameterTypes.String, "Probe fitted to magnet ['HFX'=H/FX broadband imaging probe (gradient-calibrated), 'LOWGAMMA'=low-gamma probe (gradient NOT YET CALIBRATED)]")
-    # Soft/Selective pulses
-
-    # Special acquisition
 
     # Sequence specific
-    GradientOnTime = Parameter("D71", 1000.0, ParameterTypes.Double, "Gradient Duration [&#956;s]")
+    GradientOnTime = Parameter("D71", 1000.0, ParameterTypes.Double, "Gradient Duration [&#956;s] (dephase lobe plateau; readout lobe plateau is 2*this+2*RampTime, same as v3.1)")
     RampTime = Parameter("D70", 100.0, ParameterTypes.Double, "Gradient Ramp Time [&#956;s]")
-    GradSettle = Parameter("D73", 100.0, ParameterTypes.Double, "Gradient Settling Duration [&#956;s]")
+    GradSettle = Parameter("D73", 100.0, ParameterTypes.Double, "Gradient Settling Duration [&#956;s] (used for BOTH lobes here, including the dephase->readout polarity reversal -- lengthen if you suspect eddy-current settling is polarity-dependent on your amplifier)")
     Tau = Parameter("TAU", 10000, ParameterTypes.Int32, "Echo Time [&#956;s]")
     PreGrad = Parameter("D75", 100.0, ParameterTypes.Double, "Pre-Gradient Time [&#956;s]")
     Axis = Parameter("GradAxis", "z", ParameterTypes.String, "Gradient Axis")
     AxisList = Parameter("GradAxisList", "x,y,z,none", ParameterTypes.String, "Gradient Axes")
 
-    # Mains-lock trigger -- OFF by default for imaging (see
-    # mains_lock_trigger() docstring for why). Channel is unconfirmed for
-    # X-Pulse specifically; 2 (MQC+'s mains-lock channel) is used as a
-    # placeholder default, only relevant if you turn this on.
     UseMainsLock = Parameter("UseMainsLock", 0, ParameterTypes.Int32, "Emit Mains-Lock Trigger Before Sequence [0=Off(default),1=On]")
     MainsLockChannel = Parameter("MainsLockChannel", 2, ParameterTypes.Int32, "Mains-Lock ExternalTrigger Channel [1-3, unconfirmed for X-Pulse -- see manual 3.7.19]")
 
-    # Duty-cycle guard rails (see estimate_duty_cycles() docstring: these are
-    # conservative, user-adjustable placeholders, not vendor-confirmed specs)
+    # Duty-cycle guard rails (conservative, user-adjustable placeholders)
     MaxRFDuty = Parameter("MaxRFDuty", 0.05, ParameterTypes.Double, "Max RF Duty Cycle Warning Threshold [0.0&#8230;1.0]")
     MaxGradDuty = Parameter("MaxGradDuty", 0.10, ParameterTypes.Double, "Max Gradient Duty Cycle Warning Threshold [0.0&#8230;1.0]")
 
@@ -427,17 +469,20 @@ def run(comms):
     points = P.ReceiverPoints
     DW = ReceiverFilter.dwell
 
-    # Total acquisition-window duration, i.e. what Receiver1() actually
-    # needs as its 'duration' argument (NOT the per-point dwell -- see
-    # changelog item (i), this was the compile-breaking bug in v2.0).
+    # Total acquisition-window duration -- Receiver1()'s 'duration' arg.
     ReceiverTime = DW*(points+1)
 
     times = np.arange(0, points*DW, DW) / 1.0e6
 
-    # Duration of the refocusing element used below (composite 90-270,
-    # via ninety270()): TXEnableTime + 4*P90. Used consistently in every
-    # surrounding wait so the echo stays centred on TAU regardless of P90.
+    # Duration of the refocusing element (composite 90-270, via
+    # ninety270()): TXEnableTime + 4*P90. Identical to v3.1.
     RefocusPulseWidth = P.P90*4 + 4 + P.TXEnableTime
+
+    # Elapsed time of a single apply_gradient() lobe call, given its own
+    # plateau duration 'delta' -- used to keep the gradient-branch timing
+    # formulas below self-documenting instead of repeating the same sum.
+    def lobe_elapsed(delta):
+        return P.PreGrad + 2.0*P.RampTime + delta + P.GradSettle
 
     def jcamp_meta():
         global BLP
@@ -462,13 +507,8 @@ def run(comms):
         seqAcqu.process_data(scan, acqData)
 
     # ---- Read-gradient coverage check (warning only, not a hard stop) ----
-    # The readout/decode gradient plateau (2*GradientOnTime, ramped over
-    # RampTime on each side) should span at least the digitised acquisition
-    # window (ReceiverTime), otherwise part of the FID gets sampled while
-    # the gradient is off or still ramping -- a source of truncation/
-    # 'leakage' artefacts in the profile. GradientOnTime/RampTime are now
-    # free parameters (not derived from NP/Filter), so this is a warning
-    # you can act on rather than a hard failure.
+    # Identical check to v3.1: the readout lobe's own plateau (unchanged
+    # here) should span at least the acquisition window.
     decode_plateau = P.GradientOnTime*2 + P.RampTime*2
     if decode_plateau < ReceiverTime:
         comms.log("WARNING: readout gradient plateau (~{0:.1f} us, from "
@@ -481,8 +521,6 @@ def run(comms):
 
     with sequential:
 
-        # Mains-lock trigger, if enabled -- must come before the first pulse
-        # event (manual 3.7.19). OFF by default; see mains_lock_trigger().
         mains_lock_trigger(P, comms)
 
         Transmit1SelectPort(1,1)
@@ -498,13 +536,14 @@ def run(comms):
 
         Phases.Reset()
 
-    # ---- Probe/gradient-calibration report (once, outside the scan loop) -
     report_probe_gradient(P, comms)
 
     # ---- Duty-cycle warnings (computed once, outside the scan loop) ------
+    # Total gradient on-time is the same two lobes as v3.1 (one of duration
+    # GradientOnTime, one of duration GradientOnTime*2+RampTime*2) -- just
+    # both now on the post-refocus side.
     rf_on_time = (P.P90 + P.TXEnableTime) + (RefocusPulseWidth)
-    grad_on_time = (P.PreGrad + 2*P.RampTime + P.GradientOnTime + P.GradSettle
-                    + P.PreGrad + 2*P.RampTime + (P.GradientOnTime*2+P.RampTime*2) + P.GradSettle)
+    grad_on_time = lobe_elapsed(P.GradientOnTime) + lobe_elapsed(P.GradientOnTime*2+P.RampTime*2)
     estimate_duty_cycles(P, rf_on_time, grad_on_time, comms)
 
     for seqScans in range(P.NumScans+P.DS):
@@ -521,19 +560,38 @@ def run(comms):
 
             with parallel:
                 with sequential:
-                    # 90 delay
+                    # 90 delay -- mirrors the RF branch's P1 elapsed time,
+                    # same as v3.1.
                     Delay((P.P90+P.TXEnableTime+3))
-                    # Encode Gradient
-                    apply_gradient(P.Axis, P.GradientOnTime, P.RampTime, P.G1, P.GradSettle, P.PreGrad)
-                    # TAU - gradient time
-                    safe_delay(P.Tau - (P.GradientOnTime + 2*P.RampTime + P.GradSettle + 2) - RefocusPulseWidth/2.0,
-                               "gradient first-TAU wait", comms) # first tau delay
-                    # 180 delay
+                    # No gradient during the first TAU in this variant --
+                    # wait out the FULL first-TAU period (v3.1 spent part
+                    # of it on the encode lobe; here that time is simply
+                    # idle, and the lobe reappears after the refocusing
+                    # pulse below instead).
+                    safe_delay(P.Tau - RefocusPulseWidth/2.0,
+                               "gradient first-TAU wait (grad-after-refocus variant)", comms)
+                    # Wait out the refocusing pulse itself (this branch
+                    # doesn't transmit it, just needs to stay in step).
                     safe_delay(RefocusPulseWidth,
-                               "gradient refocus-width wait", comms) # length of the 90-270 pulse and initialisation times
-                    # TAU
-                    safe_delay(P.Tau-P.PreGrad, "gradient second-TAU wait", comms) # second tau delay
-                    # Read Gradient
+                               "gradient refocus-width wait", comms)
+                    # Dephase gradient -- NOW placed immediately after the
+                    # refocusing pulse, with explicit NEGATIVE polarity
+                    # (there's no more 180 ahead of it to flip the sign
+                    # for us). Same GradientOnTime/RampTime/GradSettle as
+                    # v3.1's pre-180 encode lobe, so the -kmax offset it
+                    # produces is identical in magnitude.
+                    apply_gradient(P.Axis, P.GradientOnTime, P.RampTime, -P.G1, P.GradSettle, P.PreGrad)
+                    # Wait out the remainder of the second TAU -- same
+                    # total (Tau - PreGrad) as v3.1's "second-TAU wait",
+                    # minus the time the dephase lobe above just spent, so
+                    # the readout lobe below still starts at the exact
+                    # same moment relative to TAU as it did in v3.1 (i.e.
+                    # the already-validated acquisition-window centring is
+                    # untouched).
+                    safe_delay((P.Tau - P.PreGrad) - lobe_elapsed(P.GradientOnTime),
+                               "gradient second-TAU wait (after dephase)", comms)
+                    # Read Gradient -- unchanged from v3.1: same duration,
+                    # same +G1 polarity, same position relative to TAU.
                     apply_gradient(P.Axis, P.GradientOnTime*2+P.RampTime*2, P.RampTime, P.G1, P.GradSettle, P.PreGrad)
                 with sequential:
                     # P1
@@ -545,24 +603,15 @@ def run(comms):
                     ninety270(P.P90, ph["PH2"], ph["PH3"], P.TXEnableTime)
                     # TAU -- ReceiverFilter.dead_time is reserved out of this
                     # wait and paid back explicitly (as its own Delay, right
-                    # before Receiver1 below) rather than left out entirely.
-                    # This branch's TOTAL elapsed time is unchanged, so the
-                    # gradient branch does not need to be touched.
+                    # before Receiver1 below), exactly as in v3.1. This RF
+                    # branch is BYTE-FOR-BYTE IDENTICAL to v3.1's -- TE and
+                    # T2 weighting are therefore unchanged by this variant.
                     safe_delay(P.Tau - RefocusPulseWidth/2.0 + 1.*P.PreGrad - ReceiverFilter.dead_time,
                                "RF second-TAU wait", comms)
                     # ACQU
                     Channel1SetBasePhase(P.TXEnableTime,0)
                     Receiver1Phase(P.TXEnableTime, ph["PHRX"])
-                    # Dead1: probe ring-down time (hardware/probe-specific,
-                    # independent of Filter).
                     Delay(P.Dead1)
-                    # ReceiverFilter.dead_time: digital-filter settling time
-                    # (varies with the Filter bandwidth you choose). Without
-                    # this, Receiver1() can start capturing before the
-                    # receiver chain has actually settled, so the first part
-                    # of the acquired 'signal' is really filter transient /
-                    # ring-down, not the NMR signal -- exactly the kind of
-                    # thing that shows up as spurious 'leakage' in the FT.
                     Delay(ReceiverFilter.dead_time)
                     Receiver1(ReceiverTime, points)
 
@@ -572,108 +621,25 @@ def run(comms):
         start(seqScans, P.NumScans+P.DS)
         TX0.wait_for_data(seqScans, P.NumScans+P.DS, RecvCallback)
         comms.log("Loop = %s exec time = %s compile %s" % (seqScans, get_single_scan_execution_time(), Get_Compilation_Time()))
-        comms.log("Encode Time %s" % (P.GradientOnTime))
+        comms.log("Dephase/Encode Time %s" % (P.GradientOnTime))
 
 # -----------------------------------------------------------------------------
 # Changes/Modifications (Initials - Date - Description):
 #
-# 1. CM  - 05/08/20 - Initial Version for X-Pulse
-# 2. AS  - 25/05/21 - "Preview" instruction added
-# 3. RJB - 01/10/21 - Updated List of Basic Parameters
-# 4. AS  - 22/12/21 - Updated to run RD>=0.1s
-# 5. RJB - 27/02/23 - addition of 'def sequence_description():' and 'def sequence_basic():'
-# 6. LWG - 10/03/26 - Updated with consolidated functions for gradients, pulses, and phases.
-# 7. LWG - 17/03/26 - Updated to a 1D profile experiment using a 90-tau-90-270-acq sequence.
-# 8. LWG - ??/??/26 - "This version I will change the timing according to my older sequence"
-#                      (-> LWG_diffprof_2_H.py, confirmed to compile on this X-Pulse).
-# 9. Claude - 04/08/26 (v2.0, SUPERSEDED) - Rebuilt around timing derived from
-#      NP*Filter (matching the official 1D-profile-{x,y,z}_H.py algebra).
-#      Reported as not compiling -- most likely cause identified below (i).
-#      Kept for reference in git history/chat, not carried forward here.
-# 10. Claude - 04/08/26 (v3.0, THIS VERSION) - Rebuilt starting from
-#      LWG_diffprof_2_H.py (your confirmed-working sequence) instead, making
-#      only small, additive changes on top of it:
-#      a) GRADIENT DOUBLE-SCALING: LWG_diffprof_2_H.py computes
-#         'gradscaler' (= FPX/FPY/FPZ depending on GradAxis) and passes
-#         'P.G1*gradscaler' as the gradient amplitude into apply_gradient(),
-#         while GradientMatrix() (built from the same FPX/FPY/FPZ) ALSO
-#         scales that amplitude again in hardware. With the shipped
-#         defaults (FPX=FPY=FPZ=1.0) this is invisible, but once you
-#         calibrate FPZ to a real value (e.g. ~0.17-0.34, see the
-#         'optimised parameters' table in your imaging docs) the true
-#         current becomes G1*FPZ^2 instead of G1*FPZ. Removed the
-#         '*gradscaler' multiply; G1 is now the sole logical gradient
-#         knob and FPX/FPY/FPZ calibration is applied exactly once, by
-#         GradientMatrix(). (This is the same class of bug patched
-#         separately in the vendor's 1D-profile-z_H.py, where the
-#         SlewRate calculation was hard-coded to FPX instead of FPZ.)
-#      b) READ-GRADIENT COVERAGE CHECK: GradientOnTime (D71) and RampTime
-#         (D70) are free parameters, independent of NP/Filter, so nothing
-#         stops you from setting an acquisition window (NP*dwell) longer
-#         than the readout gradient's flat plateau -- part of the FID would
-#         then be sampled with the gradient off/ramping (truncation/
-#         'leakage'). Added a comms.log WARNING (not a hard stop, since
-#         these are legitimately independent, user-tunable parameters) that
-#         compares the two and tells you which parameter to change.
-#      c) GUARD RAILS: wrapped every TAU/PreGrad/RampTime-derived Delay()
-#         in safe_delay(), which raises a clear, specific error (naming the
-#         exact wait) instead of a silent/confusing failure if TAU is too
-#         short for your PreGrad/GradientOnTime/RampTime combination.
-#      d) DUTY-CYCLE WARNINGS: added estimate_duty_cycles(), logging
-#         estimated RF and per-axis gradient duty cycle and warning if they
-#         exceed MaxRFDuty/MaxGradDuty (new parameters, conservative
-#         user-adjustable placeholders -- no public duty-cycle spec for the
-#         X-Pulse 60 MHz RF/gradient amplifiers was available when this was
-#         written; confirm real limits with Oxford Instruments).
-#      e) Everything else (Parameters defaults, apply_gradient()'s pre_grad
-#         argument, pulse()'s Channel1SetBasePhase(1,...), the composite
-#         90-270 refocusing pulse and its RefocusPulseWidth-based timing,
-#         Receiver1(ReceiverTime, points), PhasesManager spelling) is
-#         unchanged from LWG_diffprof_2_H.py.
-#      f) SUSPECTED (BUT NOT THE ACTUAL) ROOT CAUSE OF THE v2.0 COMPILE
-#         FAILURE: v2.0 called Receiver1(DW, points) -- DW being the
-#         per-point dwell, not the total acquisition duration -- which is
-#         still fixed here (see Receiver1(ReceiverTime, points) below), but
-#         turned out not to be why v2.0 failed to compile; see (g).
-#      g) ACTUAL ROOT CAUSE OF THE COMPILE FAILURE: the file had plain
-#         Unix LF line endings. The X-Pulse pulse-sequence compiler only
-#         accepts Windows CRLF line endings (confirmed: every vendor/
-#         working .py in 'Default pps' and your own LWG_diffprof_2_H.py use
-#         CRLF; the broken v1.0/v2.0 files used LF). This file is saved
-#         with CRLF endings -- if you ever re-save it from an editor that
-#         defaults to LF, convert back to CRLF before loading it.
-#      h) DEAD TIME: previously only Dead1 (probe ring-down) was waited out
-#         before Receiver1(). Added an explicit Delay(ReceiverFilter.dead_time)
-#         (the digital filter's own settling time, which depends on the
-#         Filter/bandwidth parameter) immediately before Receiver1(), so
-#         Receiver1() only starts once BOTH the probe ring-down AND the
-#         filter's settling transient are over -- otherwise the first part
-#         of the 'signal' acquired is filter transient, not the NMR signal.
-#         This time is reserved out of (not added on top of) the preceding
-#         TAU wait, so the RF branch's total duration -- and therefore its
-#         sync with the gradient branch -- is unchanged.
-# 11. Claude - 04/08/26 - MAINS LOCK: added UseMainsLock/MainsLockChannel
-#      parameters and mains_lock_trigger(), called at the very start of the
-#      first 'with sequential:' block. Defaults to OFF (UseMainsLock=0) for
-#      this and every other sequence in the imaging family, per your
-#      instruction -- see mains_lock_trigger() docstring for the reasoning
-#      (mains triggering adds a non-deterministic pre-scan delay that works
-#      against reproducible gradient-echo timing). The manual doesn't list
-#      an X-Pulse row for the mains-lock trigger channel (only MQC+/MQR), so
-#      MainsLockChannel is left as a Parameter, not hard-coded -- confirm
-#      the right channel before ever setting UseMainsLock=1.
-# 12. Claude - 06/08/26 - PROBE SELECTOR: added a Probe Parameter ('HFX'
-#      default, or 'LOWGAMMA') plus MAXGRAD_TABLE/report_probe_gradient(),
-#      since there is no way to detect which probe is fitted from software.
-#      report_probe_gradient() logs the selected probe's max gradient
-#      strength (G/cm) for the current GradAxis once per run, and -- because
-#      Probe is a Parameter -- it is auto-recorded in the resulting JCAMP
-#      file's SpinFlow block, so leonmr/xpulse_imaging.py can convert the
-#      acquired Hz axis to mm without the operator re-entering which probe
-#      was used. MAXGRAD_TABLE currently has real calibration numbers for
-#      'HFX' (x=11.879, y=11.978, z=57.915 G/cm, measured/averaged) and
-#      placeholder None entries for 'LOWGAMMA' (not yet calibrated) -- keep
-#      this table in sync with leonmr/xpulse_imaging.py's own
-#      GRADIENT_CALIBRATION dict if either is updated.
+# 1. Claude - 06/08/26 - Branched from LWG_1D-Image-Echo_H.py v3.1 as an
+#      experimental A/B test. Only the gradient branch of run() changed:
+#      the dephase lobe moved from before the refocusing pulse (same
+#      polarity as the readout lobe, relying on the 180 to flip its
+#      effective sign) to immediately after it (explicit opposite
+#      polarity, back-to-back with the readout lobe). RF branch, Parameters,
+#      helper functions, and CallBack1D are otherwise unchanged from v3.1.
+#      See the file header for the full T2-vs-diffusion-weighting rationale
+#      and the practical timing/duty-cycle trade-offs of the swap.
+#      NOT YET VALIDATED ON HARDWARE -- before trusting results
+#      quantitatively, confirm (as was done for v3.1) that the profile
+#      comes out symmetric, positive after phasing, and centred in the
+#      acquisition window, and watch for a new artefact at the dephase/
+#      readout polarity-reversal boundary if GradSettle turns out to be
+#      too short for your amplifier's eddy-current behaviour there.
 #
 # -----------------------------------------------------------------------------

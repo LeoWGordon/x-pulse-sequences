@@ -14,7 +14,7 @@
 #
 # Created:     06/08/2026
 # Copyright:   (c) Oxford Instruments Magnetic Resonance, 2013-
-# Version:     1.1
+# Version:     1.2
 #
 # X-CHANNEL CALIBRATION -- IMPORTANT: this is a mechanical H->X port (all
 # Channel1/Transmit1/Receiver1/TX0 -> Channel2/Transmit2/Receiver2/TX1, per
@@ -266,6 +266,46 @@ def estimate_duty_cycles(P, rf_on_time, grad_on_time, comms):
                   "before running unattended.".format(grad_duty, P.MaxGradDuty))
 
 
+# Per-axis max gradient strength (G/cm) for probes that can be fitted to
+# this magnet. There is no way to detect which probe is mounted from
+# software, so this is a MANUAL selector (Probe Parameter below) -- the
+# operator must set it to match what is actually on the magnet. KEEP THIS
+# TABLE IN SYNC with leonmr/xpulse_imaging.py's own GRADIENT_CALIBRATION
+# dict (duplicated here rather than imported, since pulse programmes can't
+# import external Python modules -- same house convention used for
+# safe_delay()/mains_lock_trigger() across this family). This sequence's
+# diffusion gradient is hard-wired to the z-axis (Matrix = diag(0,0,1) in
+# run()), so there is no GradAxis Parameter here -- axis is always 'z'.
+MAXGRAD_TABLE = {
+    "HFX": {"x": 11.879, "y": 11.978, "z": 57.915},   # G/cm, measured/averaged 06/08/2026
+    "LOWGAMMA": {"x": None, "y": None, "z": None},     # NOT YET CALIBRATED
+}
+
+def report_probe_gradient(P, comms, axis="z"):
+    """Log the max gradient strength (G/cm) for the currently-selected Probe
+    on this sequence's (fixed z-axis) diffusion gradient. Since Probe is a
+    Parameter, this also gets auto-recorded in the resulting JCAMP file's
+    SpinFlow parameter block -- letting leonmr/xpulse_imaging.py convert Hz
+    to mm later without the operator having to remember/re-enter which
+    probe was fitted for a given experiment. Warns (does not fail) if the
+    fitted probe's z-axis has no calibration yet."""
+    probe_key = str(P.Probe).upper().replace('/', '').replace('-', '').replace(' ', '').replace('_', '')
+    axis_key = str(axis).strip().lower()
+    if probe_key not in MAXGRAD_TABLE:
+        comms.log("WARNING: unrecognised Probe='{0}'. Known probes: {1}. "
+                  "Hz->mm conversion will not know this probe's gradient "
+                  "calibration.".format(P.Probe, list(MAXGRAD_TABLE)))
+        return
+    maxgrad = MAXGRAD_TABLE[probe_key].get(axis_key)
+    if maxgrad is None:
+        comms.log("WARNING: Probe='{0}', axis='{1}' has NO gradient "
+                  "calibration yet -- Hz->mm conversion is undefined for "
+                  "this data until it is measured.".format(P.Probe, axis_key))
+    else:
+        comms.log("Probe: {0}. Max gradient strength ({1}-axis) = {2} G/cm."
+                  .format(P.Probe, axis_key, maxgrad))
+
+
 def time_calculation(P):
     FilterFile = ChooseFilter(P.Filter)
     ReceiverFilter = Filter(FilterFile)
@@ -342,6 +382,12 @@ class Parameters:
     RampTime = Parameter("D70", 500.0, ParameterTypes.Double, "Gradient Ramp Time [&#956;s]")
     GradSettle = Parameter("D73", 100.0, ParameterTypes.Double, "Gradient Settling Duration [&#956;s]")
     PreGrad = Parameter("D75", 1000.0, ParameterTypes.Double, "Pre-Gradient Time (delay from pulse to gradient start) [&#956;s]")
+    # Probe fitted to the magnet -- no automatic detection is possible, so
+    # this must be set MANUALLY to match what's actually mounted. Used only
+    # for logging/downstream Hz-to-mm conversion (see report_probe_gradient()
+    # above and leonmr/xpulse_imaging.py) -- has no effect on this pp's own
+    # timing/hardware calls.
+    Probe = Parameter("Probe", "HFX", ParameterTypes.String, "Probe fitted to magnet ['HFX'=H/FX broadband imaging probe (gradient-calibrated), 'LOWGAMMA'=low-gamma probe (gradient NOT YET CALIBRATED)]")
 
     # Sequence-specific timing
     Tau = Parameter("TAU", 20000.0, ParameterTypes.Double,
@@ -444,6 +490,9 @@ def run(comms):
         GradientMatrix(200,Matrix.T)
 
         Phases.Reset()
+
+    # ---- Probe/gradient-calibration report ---------------------------------
+    report_probe_gradient(P, comms)
 
     # ---- Duty-cycle warning ------------------------------------------------
     rf_on_time = 3*P.P90
@@ -553,5 +602,19 @@ def run(comms):
 #    rest of the repo. No change to the Bruker-derived phase VALUES from
 #    item 2 above, or to the resulting per-scan phase sequence -- only how
 #    the running phase state is tracked and incremented.
+# 4. Claude - 06/08/26 - PROBE SELECTOR: added a Probe Parameter ('HFX'
+#    default, or 'LOWGAMMA') plus MAXGRAD_TABLE/report_probe_gradient(),
+#    since there is no way to detect which probe is fitted from software.
+#    report_probe_gradient() logs the selected probe's max gradient
+#    strength (G/cm) for this sequence's fixed z-axis diffusion gradient
+#    once per run, and -- because Probe is a Parameter -- it is
+#    auto-recorded in the resulting JCAMP file's SpinFlow block, so
+#    leonmr/xpulse_imaging.py can convert the acquired Hz axis to mm
+#    without the operator re-entering which probe was used. MAXGRAD_TABLE
+#    currently has real calibration numbers for 'HFX' (x=11.879, y=11.978,
+#    z=57.915 G/cm, measured/averaged) and placeholder None entries for
+#    'LOWGAMMA' (not yet calibrated) -- keep this table in sync with
+#    leonmr/xpulse_imaging.py's own GRADIENT_CALIBRATION dict if either is
+#    updated.
 #
 # -----------------------------------------------------------------------------
