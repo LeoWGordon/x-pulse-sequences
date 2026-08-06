@@ -46,10 +46,11 @@ A sequence's status is recorded as a comment near the top of the `.py` file, e.g
 
 ```
 sequences/
-├── diffusion/      PFG diffusion sequences (stimulated echo, profiling, etc.)
+├── diffusion/       PFG diffusion sequences (stimulated echo, profiling, etc.)
 ├── relaxation/      T1, T2, and related relaxation measurements
 ├── imaging/         Gradient-echo / spin-echo imaging sequences
-└── calibration/      Pulse width, power, and other calibration sequences
+├── selective/       Frequency selective sequences
+└── calibration/     Pulse width, power, and other calibration sequences
 docs/
 └── validation-notes/  One note per validated (or in-progress) sequence
 ```
