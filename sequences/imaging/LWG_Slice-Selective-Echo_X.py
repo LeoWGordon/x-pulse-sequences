@@ -789,20 +789,21 @@ _DEFAULT_EXBURP_B = "0.00,-0.40,-1.42,0.74,0.06,0.03,-0.04,-0.02,0.01"
 _DEFAULT_REFOCUSBURP_A = "0.49,-1.02,1.11,-1.57,0.83,-0.42,0.26,-0.16,0.10,-0.07,0.04,-0.03,0.01,-0.02,0.00,-0.01"
 _DEFAULT_REFOCUSBURP_B = ""
 
-_default_ex_amp, _default_ex_phase = generate_shape(
-    _DEFAULT_EX_SHAPE_NAME, int(_DEFAULT_EX_SHAPE_WIDTH_US),
-    parse_burp_coeffs(_DEFAULT_EXBURP_A), parse_burp_coeffs(_DEFAULT_EXBURP_B))
-_default_refocus_amp, _default_refocus_phase = generate_shape(
-    _DEFAULT_REFOCUS_SHAPE_NAME, int(_DEFAULT_REFOCUS_SHAPE_WIDTH_US),
-    parse_burp_coeffs(_DEFAULT_REFOCUSBURP_A), parse_burp_coeffs(_DEFAULT_REFOCUSBURP_B))
-_DEFAULT_RFASH0 = round(
-    _HARD_P90_AMPLITUDE * _HARD_P90_WIDTH_US * 90.0
-    / (_DEFAULT_EX_SHAPE_WIDTH_US * 90.0 * shape_integration_factor(_default_ex_amp, _default_ex_phase))
-    / _LP_MAX_FRACTION, 4)
-_DEFAULT_RFASH1 = round(
-    _HARD_P90_AMPLITUDE * _HARD_P90_WIDTH_US * 180.0
-    / (_DEFAULT_REFOCUS_SHAPE_WIDTH_US * 90.0 * shape_integration_factor(_default_refocus_amp, _default_refocus_phase))
-    / _LP_MAX_FRACTION, 4)
+# Precomputed 07/08/2026 from the formula above (generate_shape('EBURP2',
+# 5000, ...)/('REBURP', 5870.4, ...) -> shape_integration_factor(...) =
+# 0.0610296/~0.0680 -- REBURP's width here is the AUTO-MATCHED
+# _DEFAULT_REFOCUS_SHAPE_WIDTH_US above, not a fixed 10000us, so RFAsh1
+# differs from the plain Selective-Echo files' 0.096). Deliberately NOT
+# evaluated at import time: SpinFlow executes this entire file just to
+# LOAD the sequence into the parameter panel (before run() is ever
+# called), so any on-the-fly shape synthesis at module scope runs on
+# EVERY load, not just every scan -- a needless dependency for values
+# that are meant to be swept by hand anyway. generate_shape()/
+# shape_integration_factor() remain fully available and are used normally
+# inside run(); only these one-time calibration defaults are now
+# literals.
+_DEFAULT_RFASH0 = 0.1256
+_DEFAULT_RFASH1 = 0.1636
 
 
 @ParameterBlock

@@ -505,13 +505,17 @@ _DEFAULT_SHAPE_WIDTH_US = 5000.0   # matches P90sh's own default, below
 _DEFAULT_EXBURP_A = "0.23,0.89,-1.02,-0.25,0.14,0.03,0.04,-0.03,0.00"
 _DEFAULT_EXBURP_B = "0.00,-0.40,-1.42,0.74,0.06,0.03,-0.04,-0.02,0.01"
 
-_default_amp_profile, _default_phase_profile = generate_shape(
-    _DEFAULT_SHAPE_NAME, int(_DEFAULT_SHAPE_WIDTH_US),
-    parse_burp_coeffs(_DEFAULT_EXBURP_A), parse_burp_coeffs(_DEFAULT_EXBURP_B))
-_DEFAULT_RFASH0 = round(
-    _HARD_P90_AMPLITUDE * _HARD_P90_WIDTH_US
-    / (_DEFAULT_SHAPE_WIDTH_US * shape_integration_factor(_default_amp_profile, _default_phase_profile))
-    / _LP_MAX_FRACTION, 4)
+# Precomputed 07/08/2026 from the formula above (generate_shape('EBURP2',
+# 5000, ...) -> shape_integration_factor(...) = 0.0610296, matching the
+# EBurp2 shape file's own SHAPE_INTEGFAC to 6 s.f. -- see the changelog).
+# Deliberately NOT evaluated at import time: SpinFlow executes this entire
+# file just to LOAD the sequence into the parameter panel (before run() is
+# ever called), so any on-the-fly shape synthesis at module scope runs on
+# EVERY load, not just every scan -- a needless dependency for a value
+# that's meant to be swept by hand anyway. generate_shape()/
+# shape_integration_factor() remain fully available and are used normally
+# inside run(); only this one-time calibration default is now a literal.
+_DEFAULT_RFASH0 = 0.1256
 
 
 @ParameterBlock

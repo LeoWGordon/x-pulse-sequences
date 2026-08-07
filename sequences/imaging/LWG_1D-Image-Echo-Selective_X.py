@@ -810,16 +810,19 @@ _DEFAULT_REFOCUS_SHAPE_NAME = 'REBURP' # exact Bruker-sourced table -- see _REBU
 _DEFAULT_EX_SHAPE_WIDTH_US = 5000.0    # matches P90sh's own default, below
 _DEFAULT_REFOCUS_SHAPE_WIDTH_US = 10000.0  # matches P180sh's own default, below
 
-_default_ex_amp, _default_ex_phase = generate_shape(_DEFAULT_EX_SHAPE_NAME, int(_DEFAULT_EX_SHAPE_WIDTH_US))
-_default_refocus_amp, _default_refocus_phase = generate_shape(_DEFAULT_REFOCUS_SHAPE_NAME, int(_DEFAULT_REFOCUS_SHAPE_WIDTH_US))
-_DEFAULT_RFASH0 = round(
-    _HARD_P90_AMPLITUDE * _HARD_P90_WIDTH_US * 90.0
-    / (_DEFAULT_EX_SHAPE_WIDTH_US * 90.0 * shape_integration_factor(_default_ex_amp, _default_ex_phase))
-    / _LP_MAX_FRACTION, 4)
-_DEFAULT_RFASH1 = round(
-    _HARD_P90_AMPLITUDE * _HARD_P90_WIDTH_US * 180.0
-    / (_DEFAULT_REFOCUS_SHAPE_WIDTH_US * 90.0 * shape_integration_factor(_default_refocus_amp, _default_refocus_phase))
-    / _LP_MAX_FRACTION, 4)
+# Precomputed 07/08/2026 from the formula above (generate_shape('EBURP2',
+# 5000)/('REBURP', 10000) -> shape_integration_factor(...) =
+# 0.0610296/0.0798102, matching each shape file's own SHAPE_INTEGFAC to 6
+# s.f.). Deliberately NOT evaluated at import time: SpinFlow executes this
+# entire file just to LOAD the sequence into the parameter panel (before
+# run() is ever called), so any on-the-fly shape synthesis at module scope
+# runs on EVERY load, not just every scan -- a needless dependency for
+# values that are meant to be swept by hand anyway.
+# generate_shape()/shape_integration_factor() remain fully available and
+# are used normally inside run(); only these one-time calibration
+# defaults are now literals.
+_DEFAULT_RFASH0 = 0.1256
+_DEFAULT_RFASH1 = 0.096
 
 
 @ParameterBlock
