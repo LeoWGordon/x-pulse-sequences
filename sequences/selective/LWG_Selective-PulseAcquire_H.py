@@ -11,8 +11,9 @@
 # Author:      Claude, for L. Gordon (DTU)
 #
 # Created:     06/08/2026
+# Revised:     07/08/2026
 # Copyright:   (c) Oxford Instruments Magnetic Resonance, 2013-
-# Version:     1.0
+# Version:     1.2
 #
 # Design notes:
 #  - This is LWG_Selective-Echo_H.py with the refocusing pulse, TAU-TAU
@@ -22,14 +23,29 @@
 #    resonance: sweep RFAsh0 (or P90sh) and watch the acquired signal
 #    maximise. Do this FIRST, then move to LWG_Selective-Echo_H.py to also
 #    calibrate the refocusing pulse using the same PulseOffset/P90sh/RFAsh0.
-#  - Same generate_shape()/shaped_pulse() on-the-fly EBURP1/REBURP/GAUSSIAN/
-#    SINC synthesis, LOW-power port, dedicated PulseOffset Parameter as the
-#    rest of this pulse-programme family -- carry calibrated values straight
+#  - Same generate_shape()/shaped_pulse() on-the-fly EBURP/GAUSSIAN/SINC
+#    synthesis, LOW-power port, dedicated PulseOffset Parameter as the rest
+#    of this pulse-programme family -- carry calibrated values straight
 #    across between all of them.
 #  - Parameter descriptions are kept SHORT here (units/critical info first)
 #    since SpinFlow's parameter panel has limited display width -- see the
 #    longer prose in LWG_Selective-Echo_H.py's comments/docstrings if you
 #    need the full rationale for any of these.
+#  - POWER: RFAsh0's default is a ONE-TIME approximate calculation from a
+#    calibrated hard 90 (see _HARD_P90_WIDTH_US/_HARD_P90_AMPLITUDE/
+#    _DEFAULT_RFASH0 above the Parameters block) -- not a live/reselectable
+#    calculation. Checked against Oxford's own WET-FID_H.py/WET-FID-AUTO_H.py
+#    (Default pps folder): those use a directly-calibrated shaped-pulse
+#    power Parameter with NO hard-pulse-derived formula at all (their "AUTO"
+#    variant only auto-detects the shaped pulse's FREQUENCY via a pilot
+#    scan, never its power) -- so there's no vendor formalism to defer to
+#    here; RFAsh0 is meant to be swept/recalibrated by hand regardless of
+#    what its starting default is.
+#  - SHAPE: default is E-BURP-1 pending real E-BURP-2 Fourier coefficients
+#    (or a Bruker shape-file export) from Leo -- generate_shape() already
+#    accepts 'EBURP2' as a shape name (identical Fourier-series code path
+#    to EBURP1), so switching is a one-line default change once the real
+#    numbers are in hand (see _DEFAULT_SHAPE_NAME above).
 #
 # Changes/Modifications: At end of file.
 #-------------------------------------------------------------------------------
@@ -155,7 +171,7 @@ def generate_shape(shape_name, n_steps, burp_coeffs_A=None, burp_coeffs_B=None):
     THE FLY -- identical to LWG_Selective-Echo_H.py's version; duplicated
     here so this file stays fully self-contained.
 
-    shape_name: 'GAUSSIAN', 'SINC', or 'EBURP1'/'BURP' (needs
+    shape_name: 'GAUSSIAN', 'SINC', or 'EBURP1'/'EBURP2'/'BURP' (needs
     burp_coeffs_A -- see ExBurpCoeffsA/B Parameters)."""
     shape_name = shape_name.upper()
 
@@ -173,11 +189,11 @@ def generate_shape(shape_name, n_steps, burp_coeffs_A=None, burp_coeffs_B=None):
         amp = np.abs(raw)
         phase = np.where(raw < 0, 180.0, 0.0)
 
-    elif shape_name in ('EBURP1', 'REBURP', 'BURP'):
+    elif shape_name in ('EBURP1', 'EBURP2', 'BURP'):
         if not burp_coeffs_A:
             raise ValueError(
                 "shape '{0}' requested but no Fourier A-coefficients were "
-                "supplied. EBURP1 is defined in Geen, H. &amp; "
+                "supplied. EBURP1/EBURP2 are defined in Geen, H. &amp; "
                 "Freeman, R., J. Magn. Reson. 93, 93-141 (1991) as a "
                 "truncated Fourier series -- enter coefficients as "
                 "ExBurpCoeffsA/B, or use 'GAUSSIAN' / 'SINC' instead, which "
@@ -194,7 +210,7 @@ def generate_shape(shape_name, n_steps, burp_coeffs_A=None, burp_coeffs_B=None):
 
     else:
         raise ValueError("Unknown on-the-fly shape '{0}'. Known: GAUSSIAN, "
-                          "SINC, EBURP1/BURP (needs BurpCoeffsA/B)."
+                          "SINC, EBURP1/EBURP2/BURP (needs BurpCoeffsA/B)."
                           .format(shape_name))
 
     peak = np.max(np.abs(amp))
@@ -266,53 +282,37 @@ def parse_burp_coeffs(s):
     return [float(x) for x in s.split(",") if x.strip() != ""]
 
 
-def db_to_relative_scale(dB, reference_relative_scale, convention='amplitude'):
-    """Convert a dB-referenced RF power/amplitude figure into an X-Pulse
-    linear relative-scale value (0.0..1.0). See LWG_Selective-Echo_H.py's
-    full docstring for the amplitude-vs-power convention explanation."""
-    if convention == 'amplitude':
-        divisor = 20.0
-    elif convention == 'power':
-        divisor = 10.0
-    else:
-        raise ValueError("convention must be 'amplitude' or 'power', got %r" % (convention,))
-    return reference_relative_scale * (10.0 ** (-dB / divisor))
+def shape_integration_factor(amp_profile, phase_profile_deg):
+    """COHERENT (signed) average/peak ratio of a synthesised shape envelope
+    (a.k.a. Bp/B1, or Bruker's 'Integ. Factor'): a shape spending most of
+    its duration at low amplitude needs a higher PEAK amplitude than a
+    rectangular pulse to deliver the same net rotation, since on-resonance
+    rotation depends on the AVERAGE B1 over the pulse, not the peak.
 
+    MUST use the SIGNED profile (amp*cos(radians(phase)), reconstructing
+    the real-valued Fourier-series b1(t) that generate_shape() folds into
+    amp=|b1|/phase=0-or-180), NOT mean(|amp_profile|) -- BURP-family shapes
+    (and SINC) have genuine negative lobes that partially CANCEL in the
+    on-resonance rotation (all sub-pulses share the same fixed axis when
+    phase is 0/180 and offset=0, so the rotations commute and simply add
+    algebraically). Using mean(|amp|) instead double-counts those lobes as
+    if they always added constructively, overestimating the effective
+    average B1 by a large factor for shapes with substantial negative
+    lobes (EBURP1: ~4.9x too high -- confirmed 07/08/26 by Bloch-simulating
+    the resulting 'default' RFAsh0 in leonmr/bloch_sim.py and finding it
+    excited barely 18 degrees on-resonance instead of the intended 90).
 
-def db_to_lp_relative_scale(dB, hp_reference_relative_scale, lp_max_fraction, convention='amplitude'):
-    """As db_to_relative_scale() above, re-expressed relative to the
-    LOW-power port's own full scale -- see LWG_Selective-Echo_H.py."""
-    if lp_max_fraction <= 0:
-        raise ValueError("lp_max_fraction must be > 0, got %r" % (lp_max_fraction,))
-    absolute_fraction_of_hp_max = db_to_relative_scale(dB, hp_reference_relative_scale, convention)
-    return absolute_fraction_of_hp_max / lp_max_fraction
-
-
-def shape_integration_factor(amp_profile):
-    """Average/peak ratio of a synthesised shape envelope -- see
-    LWG_Selective-Echo_H.py's full docstring for the Bp/B1 explanation."""
+    Used once, at import time below, to turn a calibrated hard-90 into an
+    approximate starting RFAsh0 default -- see the comment above
+    TXAmplitude90's Parameter() call. VERIFY any shape/power combination
+    with leonmr/bloch_sim.py (or a real nutation curve) before trusting it
+    quantitatively -- this is still only an approximation.
+    """
     peak = np.max(np.abs(amp_profile))
     if peak <= 0:
         raise ValueError("shape_integration_factor: shape has zero peak amplitude")
-    return float(np.mean(np.abs(amp_profile)) / peak)
-
-
-def estimate_shape_relative_scale(hard_pulse_width, hard_pulse_relative_scale,
-                                   shape_duration, target_rotation_deg,
-                                   integration_factor, lp_max_fraction,
-                                   power_adjust_dB=0.0):
-    """Shaped-pulse power calculation -- see LWG_Selective-Echo_H.py's full
-    docstring for the Bruker-macro-derived algebra this implements."""
-    if shape_duration <= 0 or integration_factor <= 0 or lp_max_fraction <= 0:
-        raise ValueError("estimate_shape_relative_scale: shape_duration, "
-                          "integration_factor, and lp_max_fraction must all "
-                          "be > 0 (got {0}, {1}, {2})".format(
-                          shape_duration, integration_factor, lp_max_fraction))
-    hp_equivalent_scale = (hard_pulse_relative_scale
-                            * (hard_pulse_width * target_rotation_deg)
-                            / (shape_duration * 90.0 * integration_factor)
-                            * (10.0 ** (-power_adjust_dB / 20.0)))
-    return hp_equivalent_scale / lp_max_fraction
+    signed_profile = np.asarray(amp_profile) * np.cos(np.deg2rad(phase_profile_deg))
+    return float(np.mean(signed_profile) / peak)
 
 
 def estimate_rf_duty_cycle(P, rf_on_time, comms):
@@ -329,6 +329,41 @@ def estimate_rf_duty_cycle(P, rf_on_time, comms):
                   "RFAsh0, or confirm with Oxford Instruments that this is "
                   "within the transmitter's rated duty cycle before running "
                   "unattended.".format(rf_duty, P.MaxRFDuty))
+
+
+# ---- Approximate default RFAsh0, calculated ONCE (at import time, not per
+# run) from a calibrated hard 90 pulse on the HP port -- replaces the
+# PowerCalcMethod machinery this file used to have (manual/shape/db
+# selector, RefAmplitude_HP/HardPulseWidth/ExRotation/PowerAdjust_dB/
+# Excitation_dB/DbConvention Parameters), simplified out 07/08/26 as more
+# complexity than a calibration tool needs: RFAsh0 is meant to be swept by
+# hand anyway (that's this file's whole purpose), so a single reasonable
+# STARTING VALUE is enough -- it doesn't need a live, re-selectable
+# calculation. ALWAYS verify with a real nutation curve before trusting
+# this quantitatively; it doesn't know your actual coil/sample.
+#
+#   RFAsh0 (LP-relative) ~= HardAmplitude * HardWidth
+#                            / (ShapeWidth * IntegrationFactor) / LPMaxFraction
+#
+# (target rotation is 90 deg for both the hard reference and this
+# excitation shape, so the two 90s in the full Bruker-style formula --
+# see LWG_Selective-Echo_H.py's changelog for the original derivation --
+# cancel out.)
+_HARD_P90_WIDTH_US = 9.58          # this repo's usual calibrated hard-90 width (P90/P1Hard)
+_HARD_P90_AMPLITUDE = 0.4          # ...at this HP-relative amplitude (RFA0)
+_LP_MAX_FRACTION = 0.10            # measured LP-vs-HP max-power ratio (LPMaxFraction default, below)
+_DEFAULT_SHAPE_NAME = 'EBURP1'     # TODO: switch to 'EBURP2' once real coefficients are supplied
+_DEFAULT_SHAPE_WIDTH_US = 5000.0   # matches P90sh's own default, below
+_DEFAULT_EXBURP_A = "0.23,0.89,-1.02,-0.25,0.14,0.03,0.04,-0.03,0.00"
+_DEFAULT_EXBURP_B = "0.00,-0.40,-1.42,0.74,0.06,0.03,-0.04,-0.02,0.01"
+
+_default_amp_profile, _default_phase_profile = generate_shape(
+    _DEFAULT_SHAPE_NAME, int(_DEFAULT_SHAPE_WIDTH_US),
+    parse_burp_coeffs(_DEFAULT_EXBURP_A), parse_burp_coeffs(_DEFAULT_EXBURP_B))
+_DEFAULT_RFASH0 = round(
+    _HARD_P90_AMPLITUDE * _HARD_P90_WIDTH_US
+    / (_DEFAULT_SHAPE_WIDTH_US * shape_integration_factor(_default_amp_profile, _default_phase_profile))
+    / _LP_MAX_FRACTION, 4)
 
 
 @ParameterBlock
@@ -358,26 +393,16 @@ class Parameters:
                               RD, min=100000, max=2000000000)
 
     # Shaped (chemical-shift-selective) excitation pulse -- ON THE FLY, no
-    # shape file needed. Default = E-BURP-1 (Geen &amp; Freeman 1991).
-    ExcitationShape = Parameter("ExShape", "EBURP1", ParameterTypes.String, "Excitation Shape [EBURP1(default)/GAUSSIAN/SINC/BURP]")
-    ExBurpCoeffsA = Parameter("ExBurpCoeffsA", "0.23,0.89,-1.02,-0.25,0.14,0.03,0.04,-0.03,0.00", ParameterTypes.String, "E-BURP-1 cosine coeffs A0..A8 (Geen&amp;Freeman'91 Tbl.2) -- used if ExShape=EBURP1/BURP")
-    ExBurpCoeffsB = Parameter("ExBurpCoeffsB", "0.00,-0.40,-1.42,0.74,0.06,0.03,-0.04,-0.02,0.01", ParameterTypes.String, "E-BURP-1 sine coeffs B0..B8 (Geen&amp;Freeman'91 Tbl.2) -- used if ExShape=EBURP1/BURP")
-    P90sh = Parameter("P90sh", 5000.0, ParameterTypes.Double, "Shaped 90&#176; Width [&#956;s] (=shape resolution, 1pt/&#956;s) -- SWEEP to calibrate")
-    TXAmplitude90 = Parameter("RFAsh0", 0.30, ParameterTypes.Double,
-                              "Shaped 90&#176; TX Power [0&#8230;1 of LP max] -- SWEEP to calibrate", RFA, min=0.0, max=1.0)
-    LPMaxFraction = Parameter("LPMaxFraction", 0.10, ParameterTypes.Double, "LP Port Max as Fraction of HP [0&#8230;1] -- your measured value")
-
-    # OPTIONAL power calculator -- OFF by default ('manual': RFAsh0 used as
-    # entered). 'shape' = physics calc from hard-pulse cal + shape integral
-    # (RECOMMENDED). 'db' = legacy direct dB-attenuation route. ALWAYS
-    # verify against a real nutation curve regardless of method.
-    PowerCalcMethod = Parameter("PowerCalcMethod", "manual", ParameterTypes.String, "RFAsh0 source: manual(default)/shape(recommended)/db")
-    RefAmplitude_HP = Parameter("RefAmplitude_HP", 0.40, ParameterTypes.Double, "Ref. hard-pulse rel. amplitude [0&#8230;1] on HP port, known flip angle -- for shape/db methods")
-    HardPulseWidth = Parameter("P1Hard", 9.58, ParameterTypes.Double, "Ref. hard 90&#176; width [&#956;s] at RefAmplitude_HP on HP port -- for 'shape' method")
-    ExcitationRotation = Parameter("ExRotation", 90.0, ParameterTypes.Double, "Target rotation of shape [&#176;] (EBURP1=90) -- for 'shape' method")
-    PowerAdjust_dB = Parameter("PowerAdjust_dB", 0.0, ParameterTypes.Double, "Manual fine-tune [dB] on top of 'shape' calc -- set AFTER nutation check")
-    Excitation_dB = Parameter("Excitation_dB", 0.0, ParameterTypes.Double, "Power as dB attenuation vs RefAmplitude_HP (+ve=less power) -- for 'db' method")
-    DbConvention = Parameter("DbConvention", "amplitude", ParameterTypes.String, "dB convention: amplitude(B1,usual)/power -- check your source; for 'db' method")
+    # shape file needed. Default shape is set by _DEFAULT_SHAPE_NAME above
+    # (currently EBURP1 -- switch to EBURP2 there once real coefficients
+    # are available; ExBurpCoeffsA/B below will need updating to match).
+    ExcitationShape = Parameter("ExShape", _DEFAULT_SHAPE_NAME, ParameterTypes.String, "Excitation Shape [EBURP1/EBURP2(default)/GAUSSIAN/SINC/BURP]")
+    ExBurpCoeffsA = Parameter("ExBurpCoeffsA", _DEFAULT_EXBURP_A, ParameterTypes.String, "E-BURP cosine coeffs A0..A8 (Geen&amp;Freeman'91) -- used if ExShape=EBURP1/EBURP2/BURP")
+    ExBurpCoeffsB = Parameter("ExBurpCoeffsB", _DEFAULT_EXBURP_B, ParameterTypes.String, "E-BURP sine coeffs B0..B8 (Geen&amp;Freeman'91) -- used if ExShape=EBURP1/EBURP2/BURP")
+    P90sh = Parameter("P90sh", _DEFAULT_SHAPE_WIDTH_US, ParameterTypes.Double, "Shaped 90&#176; Width [&#956;s] (=shape resolution, 1pt/&#956;s) -- SWEEP to calibrate")
+    TXAmplitude90 = Parameter("RFAsh0", _DEFAULT_RFASH0, ParameterTypes.Double,
+                              "Shaped 90&#176; TX Power [0&#8230;1 of LP max] -- default approx. from hard 90, SWEEP to calibrate", RFA, min=0.0, max=1.0)
+    LPMaxFraction = Parameter("LPMaxFraction", _LP_MAX_FRACTION, ParameterTypes.Double, "LP Port Max as Fraction of HP [0&#8230;1] -- your measured value")
 
     # Mains-lock trigger -- OFF by default.
     UseMainsLock = Parameter("UseMainsLock", 0, ParameterTypes.Int32, "Mains-Lock Trigger Before Sequence [0=Off(default),1=On]")
@@ -415,52 +440,6 @@ def run(comms):
 
     ExBurpA = parse_burp_coeffs(P.ExBurpCoeffsA)
     ExBurpB = parse_burp_coeffs(P.ExBurpCoeffsB)
-
-    # ---- Optional power calculator override -----------------------------
-    RFAsh0_effective = P.TXAmplitude90
-    PowerMethod = str(P.PowerCalcMethod).strip().lower()
-
-    if PowerMethod == 'shape':
-        ExAmpProfile, _ = generate_shape(P.ExcitationShape, max(4, int(round(P.P90sh))), ExBurpA, ExBurpB)
-        ExIntegFactor = shape_integration_factor(ExAmpProfile)
-        RFAsh0_effective = estimate_shape_relative_scale(
-            P.HardPulseWidth, P.RefAmplitude_HP, P.P90sh, P.ExcitationRotation,
-            ExIntegFactor, P.LPMaxFraction, P.PowerAdjust_dB)
-        comms.log("PowerCalcMethod='shape': integ.factor={0:.4f} -> "
-                  "RFAsh0={1:.4f} (hard-pulse ref P1Hard={2}us @ "
-                  "RefAmplitude_HP={3}, ExRotation={4}deg, "
-                  "LPMaxFraction={5:.2%}, PowerAdjust_dB={6:.2f}). "
-                  "(Parameter-panel RFAsh0 is ignored while "
-                  "PowerCalcMethod='shape'.)"
-                  .format(ExIntegFactor, RFAsh0_effective, P.HardPulseWidth,
-                          P.RefAmplitude_HP, P.ExcitationRotation,
-                          P.LPMaxFraction, P.PowerAdjust_dB))
-        if RFAsh0_effective > 1.0:
-            comms.log("WARNING: calculated relative scale exceeds 1.0 (LP "
-                      "port cannot go higher than its own max) -- "
-                      "RFAsh0_effective={0:.4f}. Check P1Hard/"
-                      "RefAmplitude_HP/ExRotation/LPMaxFraction."
-                      .format(RFAsh0_effective))
-
-    elif PowerMethod == 'db':
-        RFAsh0_effective = db_to_lp_relative_scale(P.Excitation_dB, P.RefAmplitude_HP, P.LPMaxFraction, P.DbConvention)
-        comms.log("PowerCalcMethod='db': RFAsh0 overridden -- {0:.2f} dB "
-                  "(convention='{1}') off RefAmplitude_HP={2} -> {3:.4f} "
-                  "(LP-relative, LPMaxFraction={4:.2%}). (Parameter-panel "
-                  "RFAsh0 is ignored while PowerCalcMethod='db'.)"
-                  .format(P.Excitation_dB, P.DbConvention, P.RefAmplitude_HP,
-                          RFAsh0_effective, P.LPMaxFraction))
-        if RFAsh0_effective > 1.0:
-            comms.log("WARNING: dB-calculated relative scale exceeds 1.0 "
-                      "(LP port cannot go higher than its own max) -- "
-                      "RFAsh0_effective={0:.4f}. Check RefAmplitude_HP/"
-                      "Excitation_dB/LPMaxFraction/DbConvention."
-                      .format(RFAsh0_effective))
-
-    elif PowerMethod != 'manual':
-        comms.log("WARNING: unrecognised PowerCalcMethod='{0}' -- falling "
-                  "back to 'manual' (RFAsh0 used as entered). Valid values: "
-                  "'manual', 'shape', 'db'.".format(P.PowerCalcMethod))
 
     def jcamp_meta():
         global BLP
@@ -523,7 +502,7 @@ def run(comms):
 
             # Shaped 90 (excitation) pulse -- straight to acquisition, no
             # refocusing pulse and no TAU/echo delay.
-            shaped_pulse(P.P90sh, ph["PH1"], P.ExcitationShape, RFAsh0_effective, P.TXEnableTime, Frequency, P.PulseOffset, ExBurpA, ExBurpB)
+            shaped_pulse(P.P90sh, ph["PH1"], P.ExcitationShape, P.TXAmplitude90, P.TXEnableTime, Frequency, P.PulseOffset, ExBurpA, ExBurpB)
             # ACQU
             Channel1SetBasePhase(P.TXEnableTime,0)
             Receiver1Phase(P.TXEnableTime, ph["PHRX"])
@@ -557,5 +536,41 @@ def run(comms):
 #    SpinFlow's parameter panel has limited display width -- per your
 #    request to make sure the useful parameters are actually readable
 #    there, not just present.
+# 2. Claude - 07/08/26 - POWER-CALC SIMPLIFIED OUT: removed the
+#    PowerCalcMethod machinery entirely (manual/shape/db selector, plus the
+#    RefAmplitude_HP/HardPulseWidth/ExcitationRotation/PowerAdjust_dB/
+#    Excitation_dB/DbConvention Parameters and db_to_relative_scale()/
+#    db_to_lp_relative_scale()/estimate_shape_relative_scale() functions),
+#    per your feedback that it was over-engineered for what's fundamentally
+#    a manual-sweep calibration tool. Checked Oxford's own WET-FID_H.py /
+#    WET-FID-AUTO_H.py (Default pps folder) for a vendor formalism to use
+#    instead -- they use a directly-calibrated Parameter with NO hard-
+#    pulse-derived formula, so implemented your own suggestion instead:
+#    RFAsh0's Parameter DEFAULT is now a single approximate value,
+#    calculated ONCE at import time (not re-selectable at runtime) from a
+#    calibrated hard 90 on the HP port and this shape's own integration
+#    factor (see _HARD_P90_WIDTH_US/_HARD_P90_AMPLITUDE/_DEFAULT_RFASH0
+#    above the Parameters block) -- kept shape_integration_factor() (the
+#    only piece of the old machinery that's genuinely needed) since it's
+#    what turns the shape's actual synthesised envelope into that estimate.
+#    generate_shape() also now accepts 'EBURP2' (identical Fourier-series
+#    code path to EBURP1) as prep for switching the default shape once real
+#    E-BURP-2 coefficients/a Bruker shape file are supplied -- ExShape
+#    still defaults to EBURP1 for now (see _DEFAULT_SHAPE_NAME).
+# 3. Claude - 07/08/26 - FIXED shape_integration_factor(): was using
+#    mean(|amp_profile|), which OVERESTIMATES the effective average B1 for
+#    any shape with genuine negative lobes (BURP-family, SINC) by treating
+#    every lobe as if it added constructively. Found by cross-checking
+#    item 2's new RFAsh0 default against leonmr/bloch_sim.py's Bloch
+#    simulation: the resulting pulse only excited ~18 degrees on-resonance
+#    instead of the intended 90. Fixed to use the COHERENT (signed) mean
+#    (amp*cos(radians(phase)), reconstructing the real-valued Fourier-
+#    series b1(t)) -- correct because all sub-pulses share a fixed axis
+#    on-resonance when phase is 0/180, so their rotations simply add
+#    algebraically rather than by magnitude. For EBURP1 this raised
+#    _DEFAULT_RFASH0 from 0.0231 to 0.1135 (~4.9x), confirmed to give a
+#    clean 90 degree on-resonance excitation (Mz=0, |Mxy|=1) in
+#    bloch_sim.py. GAUSSIAN (never negative) is unaffected by this fix;
+#    SINC and any future BURP-family shape are.
 #
 # -----------------------------------------------------------------------------
