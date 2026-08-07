@@ -1,0 +1,19 @@
+Errors:
+
+06/08/2026 17:58:34 Warning: No parameter file, using system defaults. Missing parameter file: 'C:\Users\Public\Documents\SpinFlow\Parameters\82863\User\1H\LWG_Selective-Echo_H.par'
+06/08/2026 17:58:36 Warning: No parameter file, using system defaults. Missing parameter file: 'C:\Users\Public\Documents\SpinFlow\Parameters\82863\User\1H\LWG_Selective-PulseAcquire_H.par'
+07/08/2026 16:37:33 Error  : System.ApplicationException: Error loading sequence. Result: 
+   at OI.MR.ScriptingSupport.Functions.SequenceFunctions.LoadSequence(String aSequenceFilePath)
+   at OI.MR.SpinFlow.Workflow.SequenceViewModel.LoadSequence(String aSequencePath, Boolean aUseSystemParameters)
+07/08/2026 16:37:33 Error  : Sequence invalid for selection: Dimension: Dimension1D Observed: ¹H Indirect: 
+07/08/2026 16:37:42 Warning: No parameter file, using system defaults. Missing parameter file: 'C:\Users\Public\Documents\SpinFlow\Parameters\82863\User\1H\LWG_Selective-Echo_H.par'
+07/08/2026 16:37:43 Error  : System.ApplicationException: Error loading sequence. Result: 
+   at OI.MR.ScriptingSupport.Functions.SequenceFunctions.LoadSequence(String aSequenceFilePath)
+   at OI.MR.SpinFlow.Workflow.SequenceViewModel.LoadSequence(String aSequencePath, Boolean aUseSystemParameters)
+07/08/2026 16:37:43 Error  : Sequence invalid for selection: Dimension: Dimension1D Observed: ¹H Indirect: 
+07/08/2026 16:38:47 Warning: No parameter file, using system defaults. Missing parameter file: 'C:\Users\Public\Documents\SpinFlow\Parameters\82863\User\1H\LWG_Selective-Echo_H.par'
+07/08/2026 16:39:17 Error  : System.ApplicationException: Error loading sequence. Result: 
+   at OI.MR.ScriptingSupport.Functions.SequenceFunctions.LoadSequence(String aSequenceFilePath)
+   at OI.MR.SpinFlow.Workflow.SequenceViewModel.LoadSequence(String aSequencePath, Boolean aUseSystemParameters)
+07/08/2026 16:39:17 Error  : Sequence invalid for selection: Dimension: Dimension1D Observed: ¹H Indirect: 
+07/08/2026 16:39:20 Warning: No parameter file, using system defaults. Missing parameter file: 'C:\Users\Public\Documents\SpinFlow\Parameters\82863\User\1H\LWG_Slice-Selective-PulseAcquire_H.par'
