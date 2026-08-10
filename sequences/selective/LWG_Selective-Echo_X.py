@@ -14,7 +14,7 @@
 # Created:     04/08/2026
 # Revised:     07/08/2026
 # Copyright:   (c) Oxford Instruments Magnetic Resonance, 2013-
-# Version:     3.0
+# Version:     3.1
 #
 # X-CHANNEL CALIBRATION -- IMPORTANT: this is a mechanical H->X port (all
 # Channel1/Transmit1/Receiver1/TX0 -> Channel2/Transmit2/Receiver2/TX1). SF
@@ -176,8 +176,21 @@ def time_calculation(P):
     ReceiverFilter = Filter(FilterFile)
     points = P.ReceiverPoints
     DW = ReceiverFilter.dwell
+    ReceiverTime = DW*(points+1)
 
-    t_scanTime = (P.P90sh + P.P180sh + P.Tau*2 + points*DW)
+    # Matches run()'s actual per-scan timing exactly (derived by summing
+    # every Delay()/duration argument in the per-scan sequential_main
+    # block). RD was previously OMITTED here entirely -- by far the
+    # dominant term (500ms+ default vs a P90sh/P180sh of a few ms each).
+    # RefocusPulseWidth cancels out of the total exactly (each TAU is
+    # defined relative to the adjacent shaped pulse's CENTRE, not its
+    # start -- Tau - ExPW/2 - RefPW/2, then Tau - RefPW/2 - dead_time --
+    # so only HALF the excitation pulse width survives net). Also
+    # includes Receiver2FilterFlush's 200us, Dead1 (probe ring-down), and
+    # 2*TXEnableTime (Channel2SetBasePhase + Receiver2Phase settle).
+    ExcitationPulseWidth = P.P90sh + P.TXEnableTime + SHAPED_PULSE_FIXED_OVERHEAD
+    t_scanTime = (P.RecycleDelay + 2*P.Tau + ExcitationPulseWidth/2.0 + 200.0
+                  + P.Dead1 + 2*P.TXEnableTime + ReceiverTime)
     t_acqTime = t_scanTime * (P.NumScans + P.DS)
     return t_acqTime
 
@@ -952,5 +965,16 @@ def run(comms):
 #       significant figures (EBURP2: 6.102960E-02, REBURP: 7.981016E-02).
 #       EBURP1/BURP (coefficient-based) remain available as ExShape/
 #       RefocusShape options for a custom shape.
+# 6. Claude - 10/08/26 - FIXED time_calculation(): RecycleDelay (RD) was
+#    completely OMITTED from the reported 'Sequence Time' -- by far the
+#    dominant term -- so the displayed total badly undercounted real scan
+#    time (found while auditing every pp file's time_calculation() after
+#    you reported the reported time never reflecting real parameters).
+#    t_scanTime is now derived by summing every Delay()/duration argument
+#    in the per-scan sequential_main block exactly (RD + 2*Tau + half the
+#    excitation pulse width -- RefocusPulseWidth cancels out net, since
+#    each TAU is defined relative to the adjacent pulse's CENTRE -- +
+#    Receiver2FilterFlush's 200us + Dead1 + 2*TXEnableTime + the
+#    acquisition window). Mirrors LWG_Selective-Echo_H.py's identical fix.
 #
 # -----------------------------------------------------------------------------

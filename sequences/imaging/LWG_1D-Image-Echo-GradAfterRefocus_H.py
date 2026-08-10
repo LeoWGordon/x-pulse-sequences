@@ -13,7 +13,7 @@
 #
 # Created:     06/08/2026
 # Copyright:   (c) Oxford Instruments Magnetic Resonance, 2013-
-# Version:     1.0 (experimental)
+# Version:     1.1 (experimental)
 #
 # WHAT CHANGED VS v3.1:
 #   v3.1 (original):  90 -- [dephase gradient, +G1] -- TAU -- 180 -- TAU --
@@ -203,10 +203,44 @@ def time_calculation(P):
     ReceiverFilter = Filter(FilterFile)
     points = P.ReceiverPoints
     DW = ReceiverFilter.dwell
+    ReceiverTime = DW*(points+1)
 
-    # Rough estimate only (used purely for the comms.log 'Sequence Time'
-    # message) -- kept close to v3.1's own approximation.
-    t_scanTime = (P.P90*5 + P.Tau*2 + points*DW)
+    RefocusPulseWidth = P.P90*4 + 4 + P.TXEnableTime
+
+    def lobe_elapsed(delta):
+        return P.PreGrad + 2.0*P.RampTime + delta + P.GradSettle
+
+    # The pulse/gradient event in run() is TWO PARALLEL branches (gradient
+    # timing vs RF timing) inside a single 'with parallel:' block -- its
+    # real elapsed time is the MAX of the two branches, not their sum (see
+    # xpulse-pulse-programmes skill sec.4). Each branch total below is
+    # derived by summing every Delay()/duration argument in that exact
+    # branch of run(), term for term -- this variant's gradient branch
+    # differs from LWG_1D-Image-Echo_H.py's (dephase lobe moved after the
+    # refocusing pulse), but its own lobe_elapsed(GOT) cancels out exactly
+    # the same way the encode-lobe term did there.
+    T_grad = (P.P90 + P.TXEnableTime + 3)
+    T_grad += (P.Tau - RefocusPulseWidth/2.0)
+    T_grad += RefocusPulseWidth
+    T_grad += lobe_elapsed(P.GradientOnTime)
+    T_grad += ((P.Tau - P.PreGrad) - lobe_elapsed(P.GradientOnTime))
+    T_grad += lobe_elapsed(P.GradientOnTime*2 + P.RampTime*2)
+
+    T_rf = (1 + P.TXEnableTime + P.P90)
+    T_rf += (P.Tau - (P.P90+3+P.TXEnableTime)/2 - RefocusPulseWidth/2.0)
+    T_rf += (1 + P.TXEnableTime + P.P90 + 1 + P.P90*3)
+    T_rf += (P.Tau - RefocusPulseWidth/2.0 + P.PreGrad - ReceiverFilter.dead_time)
+    T_rf += 2*P.TXEnableTime
+    T_rf += P.Dead1
+    T_rf += ReceiverFilter.dead_time
+    T_rf += ReceiverTime
+
+    # RD was previously OMITTED here entirely -- by far the dominant term
+    # -- and the whole gradient/RF-parallel structure was collapsed into a
+    # bare P.P90*5 approximation that accounted for neither gradients nor
+    # acquisition. Receiver1FilterFlush's 200us is the only fixed cost
+    # outside the parallel block.
+    t_scanTime = P.RecycleDelay + 200.0 + max(T_grad, T_rf)
     t_acqTime = t_scanTime * (P.NumScans + P.DS)
     return t_acqTime
 
@@ -641,5 +675,19 @@ def run(comms):
 #      acquisition window, and watch for a new artefact at the dephase/
 #      readout polarity-reversal boundary if GradSettle turns out to be
 #      too short for your amplifier's eddy-current behaviour there.
+# 2. Claude - 10/08/26 - FIXED time_calculation(): the reported 'Sequence
+#    Time' was a bare P.P90*5 + P.Tau*2 + points*DW guess that omitted
+#    RecycleDelay (RD, by far the dominant term) AND every gradient timing
+#    parameter entirely (found while auditing every pp file's
+#    time_calculation() after you reported the reported time never
+#    reflecting real parameters). Rewrote to derive the actual per-scan
+#    time from run()'s real structure: MAX of the gradient/RF parallel
+#    branches (RF branch identical to LWG_1D-Image-Echo_H.py's; gradient
+#    branch reflects this variant's post-refocus dephase-lobe placement),
+#    each summed term for term, + RD + Receiver1FilterFlush. Verified via
+#    the mock harness (2091054.96us at default Parameters -- differs from
+#    LWG_1D-Image-Echo_H.py's 2091462.96us by exactly the expected 408us,
+#    i.e. 102us/scan x 4 scans, matching the gradient-branch structural
+#    difference between the two variants).
 #
 # -----------------------------------------------------------------------------

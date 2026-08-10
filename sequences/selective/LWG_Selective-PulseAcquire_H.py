@@ -13,7 +13,7 @@
 # Created:     06/08/2026
 # Revised:     07/08/2026
 # Copyright:   (c) Oxford Instruments Magnetic Resonance, 2013-
-# Version:     1.3
+# Version:     1.4
 #
 # Design notes:
 #  - This is LWG_Selective-Echo_H.py with the refocusing pulse, TAU-TAU
@@ -148,7 +148,17 @@ def time_calculation(P):
     points = P.ReceiverPoints
     DW = ReceiverFilter.dwell
 
-    t_scanTime = (P.P90sh + points*DW)
+    # Matches run()'s actual per-scan timing -- see
+    # Delay(P.RecycleDelay-9.0e4) + trailing Delay(9.0e4) in run() (RD is
+    # split across two Delay() calls but sums to exactly RD per scan) plus
+    # shaped_pulse()'s P90sh+TXEnableTime, Dead1 (probe ring-down), and the
+    # receiver filter's dead_time before Receiver1(). RD was previously
+    # OMITTED here entirely -- by far the dominant term (500ms+ default vs
+    # a P90sh of a few ms) -- see changelog. Microsecond-scale fixed
+    # instruction overhead (SHAPED_PULSE_FIXED_OVERHEAD=14us, the 200us
+    # Receiver1FilterFlush, etc.) is omitted as negligible next to RD.
+    t_scanTime = (P.RecycleDelay + P.P90sh + P.TXEnableTime + P.Dead1
+                  + ReceiverFilter.dead_time + points*DW)
     t_acqTime = t_scanTime * (P.NumScans + P.DS)
     return t_acqTime
 
@@ -741,5 +751,14 @@ def run(comms):
 #    figures -- confirms both the table transcription and the item-3 fix
 #    against an independent, vendor-authoritative source. EBURP1/BURP
 #    (coefficient-based) remain available as ExShape options.
+# 5. Claude - 10/08/26 - FIXED time_calculation(): RecycleDelay (RD) was
+#    completely OMITTED from the reported 'Sequence Time' -- by far the
+#    dominant term (500ms+ default vs a P90sh of a few ms), so the
+#    displayed total badly undercounted real scan time (found while
+#    auditing every pp file's time_calculation() after you reported the
+#    reported time never reflecting real parameters). t_scanTime now
+#    includes RD + P90sh + TXEnableTime + Dead1 + ReceiverFilter.dead_time
+#    + points*DW, matching run()'s actual per-scan delay structure
+#    (Delay(RD-9.0e4) + trailing Delay(9.0e4) sum to exactly RD per scan).
 #
 # -----------------------------------------------------------------------------

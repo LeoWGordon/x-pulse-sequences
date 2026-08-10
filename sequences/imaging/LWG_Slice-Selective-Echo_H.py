@@ -12,7 +12,7 @@
 # Created:     06/08/2026
 # Revised:     07/08/2026
 # Copyright:   (c) Oxford Instruments Magnetic Resonance, 2013-
-# Version:     1.1
+# Version:     1.2
 #
 # Design notes -- READ THIS:
 #
@@ -203,8 +203,33 @@ def time_calculation(P):
     ReceiverFilter = Filter(FilterFile)
     points = P.ReceiverPoints
     DW = ReceiverFilter.dwell
+    ReceiverTime = DW*(points+1)
 
-    t_scanTime = (P.P90sh + P.P180sh + P.Tau*2 + points*DW)
+    # Matches run()'s actual per-scan timing exactly (purely sequential --
+    # no 'with parallel:' -- so this is every Delay()/duration argument in
+    # the per-scan block summed directly, then algebraically simplified).
+    # RD was previously OMITTED entirely -- by far the dominant term --
+    # and the whole gradient/rephase/crusher event was collapsed into a
+    # bare P90sh+P180sh+Tau*2 guess. The exact sum has striking
+    # cancellations, all confirmed by symbolic expansion: RefocusPulseWidth
+    # cancels out completely (RefocusLeadToCentre/RefocusCentreToEventEnd
+    # each subtract half of it out of the TAUs, exactly matching the
+    # refocusing event's own contribution); ExGradHoldRephase (and hence
+    # RephaseFraction) cancels out completely too (subtracted out of
+    # ExCentreToEventEnd exactly as it was added); and CrusherBlockTime
+    # cancels out completely AND IS CRUSHERON-INDEPENDENT (each crusher's
+    # own elapsed time is exactly compensated by being subtracted out of
+    # the following TAU, whether or not a crusher actually runs). What
+    # survives: RD + 2*Tau + half the excitation pulse width + one
+    # PreGrad/RampTime pair (from ExCentreToEventEnd/RefocusLeadToCentre
+    # not being perfectly symmetric) + Dead1 + 2.5*TXEnableTime (net,
+    # after cancellation against the TAU-embedded half-TXEnableTime terms)
+    # + half SHAPED_PULSE_FIXED_OVERHEAD + acquisition + a 205us fixed
+    # small-instruction remainder.
+    t_scanTime = (P.RecycleDelay + 2*P.Tau + P.P90sh/2.0 + P.PreGrad
+                  + P.RampTime + P.Dead1 + ReceiverTime
+                  + 2.5*P.TXEnableTime + SHAPED_PULSE_FIXED_OVERHEAD/2.0
+                  + 205.0)
     t_acqTime = t_scanTime * (P.NumScans + P.DS)
     return t_acqTime
 
@@ -1192,5 +1217,21 @@ def run(comms):
 #    computed and hardcoded as 6020.0), so the slice-matching logic in
 #    run() stays self-consistent with the Parameter panel's displayed
 #    defaults automatically.
+# 3. Claude - 10/08/26 - FIXED time_calculation(): the reported 'Sequence
+#    Time' was a bare P90sh+P180sh+Tau*2+points*DW guess that omitted
+#    RecycleDelay (RD, by far the dominant term) AND the entire gradient/
+#    rephase/crusher event (found while auditing every pp file's
+#    time_calculation() after you reported the reported time never
+#    reflecting real parameters). Rewrote as an exact term-for-term sum of
+#    every Delay()/duration argument in the (purely sequential) per-scan
+#    block, then algebraically simplified (via symbolic expansion) --
+#    RefocusPulseWidth, ExGradHoldRephase (and hence RephaseFraction), and
+#    CrusherBlockTime ALL cancel out of the total completely (crusher
+#    timing is CrusherOn-independent: each crusher's own elapsed time is
+#    exactly compensated by being subtracted out of the following TAU,
+#    whether or not it actually runs), leaving RD + 2*Tau + P90sh/2 +
+#    PreGrad + RampTime + Dead1 + 2.5*TXEnableTime + acquisition + a small
+#    fixed remainder. Verified via the mock harness (4354296.0us at
+#    default Parameters, matching the symbolic derivation exactly).
 #
 # -----------------------------------------------------------------------------

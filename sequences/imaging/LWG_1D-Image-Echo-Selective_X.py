@@ -12,7 +12,7 @@
 # Created:     04/08/2026
 # Revised:     07/08/2026
 # Copyright:   (c) Oxford Instruments Magnetic Resonance, 2013-
-# Version:     4.2
+# Version:     4.3
 #
 # IMPORTANT (v4.0): if your v3.0 profile was just 'burning a hole' at the
 # target frequency instead of forming a clean selective image, the most
@@ -168,10 +168,42 @@ def time_calculation(P):
     ReceiverFilter = Filter(FilterFile)
     points = P.ReceiverPoints
     DW = ReceiverFilter.dwell
+    ReceiverTime = DW*(points+1)
 
-    # Rough estimate only (used purely for the comms.log 'Sequence Time'
-    # message).
-    t_scanTime = (P.P90sh + P.P180sh + P.Tau*2 + points*DW)
+    ExcitationPulseWidth = P.P90sh + P.TXEnableTime + SHAPED_PULSE_FIXED_OVERHEAD
+    RefocusPulseWidth = P.P180sh + P.TXEnableTime + SHAPED_PULSE_FIXED_OVERHEAD
+
+    # The pulse/gradient event in run() is TWO PARALLEL branches (gradient
+    # timing vs shaped-RF timing) inside a single 'with parallel:' block --
+    # its real elapsed time is the MAX of the two branches, not their sum
+    # (see xpulse-pulse-programmes skill sec.4). Each branch total below is
+    # derived by summing every Delay()/duration argument in that exact
+    # branch of run(), term for term.
+    def apply_gradient_time(delta):
+        return P.PreGrad + delta + 2*P.RampTime + P.GradSettle + 2
+
+    T_grad = ExcitationPulseWidth
+    T_grad += apply_gradient_time(P.GradientOnTime)
+    T_grad += (P.Tau - (P.GradientOnTime + 2*P.RampTime + P.GradSettle + 2) - RefocusPulseWidth/2.0)
+    T_grad += RefocusPulseWidth
+    T_grad += (P.Tau - P.PreGrad)
+    T_grad += apply_gradient_time(P.GradientOnTime*2 + P.RampTime*2)
+
+    T_rf = ExcitationPulseWidth
+    T_rf += (P.Tau - ExcitationPulseWidth/2 - RefocusPulseWidth/2.0)
+    T_rf += RefocusPulseWidth
+    T_rf += (P.Tau - RefocusPulseWidth/2.0 + P.PreGrad - ReceiverFilter.dead_time)
+    T_rf += 2*P.TXEnableTime
+    T_rf += P.Dead1
+    T_rf += ReceiverFilter.dead_time
+    T_rf += ReceiverTime
+
+    # RD was previously OMITTED here entirely -- by far the dominant term
+    # -- and the whole gradient/RF-parallel structure was collapsed into a
+    # bare P90sh+P180sh+Tau*2 approximation that accounted for neither
+    # gradients nor acquisition. Receiver2FilterFlush's 200us is the only
+    # fixed cost outside the parallel block.
+    t_scanTime = P.RecycleDelay + 200.0 + max(T_grad, T_rf)
     t_acqTime = t_scanTime * (P.NumScans + P.DS)
     return t_acqTime
 
@@ -1266,5 +1298,15 @@ def run(comms):
 #      significant figures (EBURP2: 6.102960E-02, REBURP: 7.981016E-02),
 #      and the resulting defaults give a clean 90/180 degree on-resonance
 #      rotation in leonmr/bloch_sim.py.
+# 14. Claude - 10/08/26 - FIXED time_calculation(): mirrors
+#     LWG_1D-Image-Echo-Selective_H.py's identical fix -- the reported
+#     'Sequence Time' was a bare P90sh+P180sh+Tau*2+points*DW guess that
+#     omitted RecycleDelay (RD, by far the dominant term) AND every
+#     gradient timing parameter entirely. Rewrote to derive the actual
+#     per-scan time from run()'s real structure (MAX of the gradient/
+#     shaped-RF parallel branches, each summed term for term, + RD +
+#     Receiver2FilterFlush). Verified via the mock harness against
+#     LWG_1D-Image-Echo-Selective_H.py's result at matching default
+#     Parameters (2211412.0us, identical).
 #
 # -----------------------------------------------------------------------------

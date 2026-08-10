@@ -13,7 +13,7 @@
 #
 # Created:     06/08/2026
 # Copyright:   (c) Oxford Instruments Magnetic Resonance, 2013-
-# Version:     1.2
+# Version:     1.3
 #
 # Design notes:
 #  - Structurally a NEAR-VERBATIM port of the vendor's PGSE_H.py (three-pulse
@@ -300,15 +300,24 @@ def time_calculation(P):
     ReceiverFilter = Filter(FilterFile)
     DW = ReceiverFilter.dwell
 
-    GradWidth = 2*P.RampTime + P.GradientOnTime
-    # D3 is the same "rest of TAU" sub-delay used on both sides -- see run()
-    # for the exact per-side algebra; this is a close approximation for
-    # SpinFlow's sequence-time estimate.
-    D3 = P.Tau - GradWidth - P.PreGrad - P.GradSettle - P.P90 - 7
-
-    t_scanTime = ( 300 + P.RecycleDelay + 3*(P.TXEnableTime + P.P90)
-                 + 2*(P.PreGrad + GradWidth + P.GradSettle + D3)
-                 + P.TM + ( DW * P.ReceiverPoints ))
+    # Matches run()'s actual per-scan timing exactly (this file already
+    # included RD -- unlike most other pp files in this repo, see
+    # changelog for the wider audit -- but the previous D3/PreGrad/
+    # GradWidth bookkeeping double-counted the two TAU periods' explicit
+    # gradient delays against D3's own "rest of TAU" subtraction, a real
+    # ~100-150us/scan error, small next to RD but non-zero). Purely
+    # sequential (no 'with parallel:' here), so this is just every
+    # Delay()/duration argument in the per-scan block summed exactly, then
+    # algebraically simplified: the three P90 pulses and TXEnableTime
+    # delays partially cancel against the TM/D3a/D3b subtractions (each of
+    # which nets out a P90/2 or TXEnableTime term), leaving TM - P90 +
+    # 2*TXEnableTime net; the two TAU periods contribute 2*Tau net (their
+    # own PreGrad/GradWidth/GradSettle terms cancel exactly against D3a/
+    # D3b's subtraction of the same terms); 208us is the sum of every
+    # small fixed-duration instruction (Channel1SetBasePhase/
+    # Transmit1Blanking/Gradient3SlewRate/Receiver1FilterFlush/etc.).
+    t_scanTime = (P.RecycleDelay + 2*P.Tau + P.TM - P.P90 + 2*P.TXEnableTime
+                  + ReceiverFilter.group_delay + P.ReceiverPoints*DW + 208.0)
     t_acqTime = t_scanTime * (P.NumScans + P.DS)
     return t_acqTime
 
@@ -608,5 +617,18 @@ def run(comms):
 #    'LOWGAMMA' (not yet calibrated) -- keep this table in sync with
 #    leonmr/xpulse_imaging.py's own GRADIENT_CALIBRATION dict if either is
 #    updated.
+# 6. Claude - 10/08/26 - FIXED time_calculation(): this file already
+#    included RD (unlike most other pp files in this repo -- see the
+#    wider audit prompted by you reporting the reported time never
+#    reflecting real parameters), but the D3/PreGrad/GradWidth bookkeeping
+#    double-counted the two TAU periods' explicit gradient delays against
+#    D3's own "rest of TAU" subtraction -- a real ~100-150us/scan error,
+#    small next to RD but non-zero. Rewrote as an exact term-for-term sum
+#    of every Delay()/duration argument in the (purely sequential, no
+#    'with parallel:') per-scan block, algebraically simplified to
+#    RD + 2*Tau + TM - P90 + 2*TXEnableTime + group_delay + points*DW +
+#    208 (fixed small-instruction overhead). Verified via the mock
+#    harness (67936352.0us at default Parameters, matching an independent
+#    symbolic derivation exactly).
 #
 # -----------------------------------------------------------------------------

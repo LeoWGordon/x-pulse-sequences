@@ -15,7 +15,7 @@
 # Created:     06/08/2026
 # Revised:     07/08/2026
 # Copyright:   (c) Oxford Instruments Magnetic Resonance, 2013-
-# Version:     1.1
+# Version:     1.2
 #
 # X-CHANNEL CALIBRATION -- IMPORTANT: this is a mechanical H->X port (all
 # Channel1/Transmit1/Receiver1/TX0 -> Channel2/Transmit2/Receiver2/TX1). SF
@@ -197,8 +197,23 @@ def time_calculation(P):
     ReceiverFilter = Filter(FilterFile)
     points = P.ReceiverPoints
     DW = ReceiverFilter.dwell
+    ReceiverTime = DW*(points+1)
 
-    t_scanTime = (P.P90sh*1.6 + P.Dead1 + points*DW)
+    # Matches run()'s actual per-scan timing exactly (purely sequential --
+    # no 'with parallel:' -- so this is every Delay()/duration argument in
+    # the per-scan block summed directly). RD was previously OMITTED
+    # entirely -- by far the dominant term -- and the whole slice-select
+    # gradient/rephase-lobe event was collapsed into a bare P90sh*1.6
+    # guess. ExcitationPulseWidth is shaped_pulse()'s exact elapsed time;
+    # GradHoldRephase (RephaseFraction x ExcitationPulseWidth) is the
+    # rephase lobe's hold time, matching GradHoldRephase in run().
+    ExcitationPulseWidth = P.P90sh + P.TXEnableTime + SHAPED_PULSE_FIXED_OVERHEAD
+    GradHoldRephase = P.RephaseFraction * ExcitationPulseWidth
+
+    t_scanTime = (P.RecycleDelay + 200.0 + P.PreGrad + 4*P.RampTime + 3.0
+                  + ExcitationPulseWidth + GradHoldRephase + P.GradSettle
+                  + 2*P.TXEnableTime + P.Dead1 + ReceiverFilter.dead_time
+                  + ReceiverTime)
     t_acqTime = t_scanTime * (P.NumScans + P.DS)
     return t_acqTime
 
@@ -952,5 +967,13 @@ def run(comms):
 #    (P90sh/RFAsh0/GradCal_HzPerCm) still need re-calibrating for whatever
 #    nucleus you actually put on the X channel -- see X-CHANNEL CALIBRATION
 #    note at the top of this file.
+# 3. Claude - 10/08/26 - FIXED time_calculation(): mirrors
+#    LWG_Slice-Selective-PulseAcquire_H.py's identical fix -- the reported
+#    'Sequence Time' was a bare P90sh*1.6 + Dead1 + points*DW guess that
+#    omitted RecycleDelay (RD, by far the dominant term) AND the entire
+#    slice-select gradient/rephase-lobe event. Rewrote as an exact term-
+#    for-term sum matching run() exactly. Verified via the mock harness
+#    against LWG_Slice-Selective-PulseAcquire_H.py's result at matching
+#    default Parameters (2040516.0us, identical).
 #
 # -----------------------------------------------------------------------------

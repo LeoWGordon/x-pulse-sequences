@@ -11,7 +11,7 @@
 # Created:     04/08/2026
 # Revised:     06/08/2026
 # Copyright:   (c) Oxford Instruments Magnetic Resonance, 2013-
-# Version:     1.1
+# Version:     1.2
 #
 # Design notes -- READ THIS, this sequence is structurally different from
 # LWG_1D-Image-Echo_H.py, not just a parameter change:
@@ -150,8 +150,26 @@ def time_calculation(P):
     ReceiverFilter = Filter(FilterFile)
     points = P.ReceiverPoints
     DW = ReceiverFilter.dwell
+    ReceiverTime = DW*(points+1)
 
-    t_scanTime = (P.RecycleDelay + P.P90 + P.Dead1 + ReceiverFilter.dead_time + points*DW)
+    # Matches run()'s actual per-scan timing exactly (previous formula
+    # already included RD -- unlike most other pp files in this repo, see
+    # changelog for the wider audit -- but omitted PreGrad/RampTime/
+    # GradSettle, a small ~0.1% underestimate given RD already dominates).
+    # The pulse/gradient event is a 'with parallel:' block whose two
+    # branches (gradient hold vs RF+acquisition) are constructed in run()
+    # to have matching total elapsed time via Hold/TrailingPad -- the
+    # gradient branch is used here since it's very slightly the longer of
+    # the two by construction (its own PreGrad/2*RampTime/GradSettle
+    # overhead isn't offset by anything on the RF side). RD +
+    # Receiver1FilterFlush's 200us are the fixed costs outside the
+    # parallel block.
+    PulseElapsed = P.P90 + P.TXEnableTime + 3
+    PostPulseOverhead = 2
+    Hold = PulseElapsed + PostPulseOverhead + P.Dead1 + ReceiverFilter.dead_time + ReceiverTime
+    GradBranch = P.PreGrad + Hold + 2*P.RampTime + P.GradSettle + 2
+
+    t_scanTime = P.RecycleDelay + 200.0 + GradBranch
     t_acqTime = t_scanTime * (P.NumScans + P.DS)
     return t_acqTime
 
@@ -600,5 +618,15 @@ def run(comms):
 #    placeholder None entries for 'LOWGAMMA' (not yet calibrated) -- keep
 #    this table in sync with leonmr/xpulse_imaging.py's own
 #    GRADIENT_CALIBRATION dict if either is updated.
+# 4. Claude - 10/08/26 - REFINED time_calculation(): this file already
+#    included RD (unlike most other pp files in this repo -- see the wider
+#    audit prompted by you reporting the reported time never reflecting
+#    real parameters), but omitted PreGrad/RampTime/GradSettle, a small
+#    (~0.1%, since RD already dominates) systematic underestimate. Now
+#    derives the exact gradient-branch total (the slightly-longer of the
+#    two 'with parallel:' branches, by construction) using the same
+#    Hold/PulseElapsed logic already defined in run(), + RD +
+#    Receiver1FilterFlush. Verified via the mock harness (2006766.32us at
+#    default Parameters, vs 2004254.32us previously).
 #
 # -----------------------------------------------------------------------------
