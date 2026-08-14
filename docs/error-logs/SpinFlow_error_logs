@@ -17,3 +17,19 @@ Errors:
    at OI.MR.SpinFlow.Workflow.SequenceViewModel.LoadSequence(String aSequencePath, Boolean aUseSystemParameters)
 07/08/2026 16:39:17 Error  : Sequence invalid for selection: Dimension: Dimension1D Observed: ¹H Indirect: 
 07/08/2026 16:39:20 Warning: No parameter file, using system defaults. Missing parameter file: 'C:\Users\Public\Documents\SpinFlow\Parameters\82863\User\1H\LWG_Slice-Selective-PulseAcquire_H.par'
+
+14/08/2026 11:23:36 Warning: No parameter file, using system defaults. Missing parameter file: 'C:\Users\Public\Documents\SpinFlow\Parameters\82863\User\1H\LWG_PGSTE-WET_H.par'
+14/08/2026 11:29:45 Warning: No parameter file, using system defaults. Missing parameter file: 'C:\Users\Public\Documents\SpinFlow\Parameters\82863\User\1H\LWG_PFGSTE_H.par'
+14/08/2026 11:29:47 Warning: No parameter file, using system defaults. Missing parameter file: 'C:\Users\Public\Documents\SpinFlow\Parameters\82863\User\1H\LWG_PGSE-WET_H.par'
+14/08/2026 11:29:51 Warning: No parameter file, using system defaults. Missing parameter file: 'C:\Users\Public\Documents\SpinFlow\Parameters\82863\User\1H\LWG_PGSTE-WET_H.par'
+14/08/2026 11:30:48 Error  : An exception occurred when running the sequence:
+Traceback (most recent call last):
+  File "monitor.py", line 283, in LaunchSequence
+    sequence.run(comms)
+  File "/tmp/tmpt65cdn.py", line 600, in run
+    Phases = PhasesManager(P)
+  File "/home/fire/PythonMonitor/firebird/parallel/utils.py", line 486, in __init__
+    phaseTmp[key[3:]] = (key[3:], PhaseListContainer(value.value))
+  File "/home/fire/PythonMonitor/firebird/parallel/utils.py", line 450, in __init__
+    self._list = [ int(x) for x in s.split(",") ]
+AttributeError: 'float' object has no attribute 'split'
