@@ -16,7 +16,7 @@
 #
 # Created:     10/08/2026
 # Copyright:   (c) Oxford Instruments Magnetic Resonance, 2013-
-# Version:     1.1
+# Version:     1.2
 # status:      draft
 #
 # Design notes:
@@ -605,8 +605,19 @@ def run(comms):
     ReceiverFilter = Filter(P.Filter)
     ReceiverTime = ReceiverFilter.dwell*(P.ReceiverPoints+0.99)
 
-    Phases = PhasesManager(P)
-    Phases.Reset()
+    # Individual PhaseListContainer per phase Parameter, matching the
+    # vendor's own confirmed-working pattern (PGSE_H.py/WET-PRE_H.py,
+    # Default pps folder) -- NOT PhasesManager(P)/ph["PH1"]-style dict
+    # indexing, which crashed on real hardware with "KeyError: 'PH1'"
+    # (the returned dict is evidently NOT keyed by the raw short code the
+    # way this file previously assumed) -- see changelog. Incremented
+    # phase values are named PH1/PH2/PH3/PHRX (matching the short codes
+    # exactly), not P1Phase.Inc() etc., since PH1 etc. are what get passed
+    # straight into Channel1SetBasePhase()/Receiver1Phase().
+    P1Phase = PhaseListContainer(P.P1Phase)
+    P2Phase = PhaseListContainer(P.P2Phase)
+    P3Phase = PhaseListContainer(P.P3Phase)
+    RXPhase = PhaseListContainer(P.RXPhase)
 
     points = P.ReceiverPoints
     times = np.arange(0, points*ReceiverFilter.dwell, ReceiverFilter.dwell) / 1.0e6
@@ -661,7 +672,10 @@ def run(comms):
         # Gradient Setup
         GradientMatrix(200,Matrix.T)
 
-        Phases.Reset()
+        P1Phase.Reset()
+        P2Phase.Reset()
+        P3Phase.Reset()
+        RXPhase.Reset()
 
     # ---- Probe/gradient-calibration report ---------------------------------
     report_probe_gradient(P, comms)
@@ -692,11 +706,17 @@ def run(comms):
         with sequential_main(seqScans,P.NumScans+P.DS):
 
             if seqScans == P.DS:
-                Phases.Reset()
+                P1Phase.Reset()
+                P2Phase.Reset()
+                P3Phase.Reset()
+                RXPhase.Reset()
 
-            ph = Phases.Incd()
+            PH1 = P1Phase.Inc()
+            PH2 = P2Phase.Inc()
+            PH3 = P3Phase.Inc()
+            PHRX = RXPhase.Inc()
 
-            Channel1SetBasePhase(10, ph["PH1"])
+            Channel1SetBasePhase(10, PH1)
             Receiver1FilterFlush(200, ReceiverFilter)
             # RD -- quiet wait BEFORE the WET module starts (see design notes)
             Delay(P.RecycleDelay-9.0e4)
@@ -721,7 +741,7 @@ def run(comms):
             safe_delay(D3a, "first-TAU rest wait", comms)
 
             # P2 -- storage 90 (stores cos-modulated phase along Z)
-            Channel1SetBasePhase(3, ph["PH2"])
+            Channel1SetBasePhase(3, PH2)
             Transmit1BlankingOn(1)
             Delay(P.TXEnableTime)
             Transmit1(P.P90)
@@ -732,7 +752,7 @@ def run(comms):
             safe_delay(P.TM - P.TXEnableTime - (P.P90/2.) - (P.P90/2.), "TM mixing wait", comms)
 
             # P3 -- restore 90 (returns stored Z-magnetization to transverse)
-            Channel1SetBasePhase(3, ph["PH3"])
+            Channel1SetBasePhase(3, PH3)
             Transmit1BlankingOn(1)
             Delay(P.TXEnableTime)
             Transmit1(P.P90)
@@ -752,7 +772,7 @@ def run(comms):
 
             # ACQU
             Channel1SetBasePhase(1,0)
-            Receiver1Phase(1, ph["PHRX"])
+            Receiver1Phase(1, PHRX)
             Delay(ReceiverFilter.dead_time)
             Receiver1(P.ReceiverPoints*ReceiverFilter.dwell, P.ReceiverPoints)
 
@@ -800,5 +820,20 @@ def run(comms):
 #    AttributeError locally for any non-string "...Phase"-named attribute)
 #    so this class of bug is caught before deployment in future pp files,
 #    not just this one.
+# 3. Claude - 14/08/26 - FIXED a second, distinct crash on real hardware
+#    (again, full traceback supplied by you): "KeyError: 'PH1'" at
+#    Channel1SetBasePhase(10, ph["PH1"]), where ph = Phases.Incd() and
+#    Phases = PhasesManager(P). PhasesManager's returned dict is evidently
+#    NOT keyed by the raw short code "PH1"/"PH2"/"PH3"/"PHRX" the way this
+#    file (and, it turns out, most of this repo) assumed -- despite that
+#    being the pattern used throughout. Switched to individual
+#    PhaseListContainer objects per phase Parameter (P1Phase/P2Phase/
+#    P3Phase/RXPhase), matching the vendor's own confirmed-working pattern
+#    (PGSE_H.py/WET-PRE_H.py, Default pps folder) instead of going through
+#    PhasesManager at all. The incremented per-scan phase values are named
+#    PH1/PH2/PH3/PHRX -- matching the short codes exactly -- since those
+#    are what get passed straight into Channel1SetBasePhase()/
+#    Receiver1Phase(). Verified via the mock harness (no exception, full
+#    32-scan loop completes).
 #
 # -----------------------------------------------------------------------------
