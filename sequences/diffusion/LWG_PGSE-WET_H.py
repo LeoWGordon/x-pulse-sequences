@@ -506,14 +506,13 @@ class Parameters:
     WetOn = Parameter("WetOn", 1, ParameterTypes.Int32, "Enable WET water suppression [1=On(default), 0=Off]")
     WetOffsetPPM = Parameter("WetOffsetPPM", 4.7, ParameterTypes.Double, "*** WET target [ppm] rel. SF+O1 -- SET to your water peak ***")
     WetShape = Parameter("WetShape", "GAUSSIAN", ParameterTypes.String, "WET Pulse Shape [GAUSSIAN(default)/SINC]")
-    # NOTE: attribute name deliberately does NOT end in "Phase" -- SpinFlow's
-    # PhasesManager auto-discovers ANY Parameter whose attribute name ends
-    # with "Phase" (matching P1Phase/P2Phase/RXPhase above) and
-    # unconditionally tries to parse its value as a comma-separated integer
-    # phase-cycle list, regardless of declared type. A first version of this
-    # file named this WetPhase and crashed on real hardware with
-    # "AttributeError: 'float' object has no attribute 'split'" inside
-    # PhasesManager.__init__ -- see changelog.
+    # NOTE: attribute name deliberately is NOT "PH..." or "...Phase" --
+    # SpinFlow's PhasesManager auto-discovers genuine phase-cycle
+    # Parameters (PH1/PH2/PHRX below) and unconditionally tries to parse
+    # their value as a comma-separated integer phase-cycle list. A first
+    # version of this file named this WetPhase and crashed on real
+    # hardware with "AttributeError: 'float' object has no attribute
+    # 'split'" inside PhasesManager.__init__ -- see changelog.
     WetAngle = Parameter("WETANG", 0.0, ParameterTypes.Double, "WET Pulse Phase [&#176;] -- same for all 4, spoiled after each so phase doesn't matter")
     WetPulseWidth = Parameter("WetP90sh", 20000.0, ParameterTypes.Double, "WET Shaped Pulse Width [&#956;s] -- sets excitation BW (~110Hz FWHM default, R_GAUSSIAN_90=2.2)")
     WetAmp1 = Parameter("WetAmp1", _DEFAULT_WET_AMP1, ParameterTypes.Double,
@@ -542,10 +541,13 @@ class Parameters:
     MainsLockChannel = Parameter("MainsLockChannel", 2, ParameterTypes.Int32, "Mains-Lock Trigger Channel [1-3, unconfirmed for X-Pulse]")
 
     # Phases -- simple EXORCYCLE-style 2-step cycle (see design notes). The
-    # WET module's own WetAngle (above) is fixed, not cycled.
-    P1Phase = Parameter("PH1","0", ParameterTypes.String,"P1 (excitation) RF-Pulse Phase")
-    P2Phase = Parameter("PH2","90,270", ParameterTypes.String,"P2 (refocus) RF-Pulse Phase [EXORCYCLE, 2-step]")
-    RXPhase = Parameter("PHRX","0,180", ParameterTypes.String,"Acquisition Phase [2-step, matches PH2]")
+    # WET module's own WetAngle (above) is fixed, not cycled. Attribute
+    # name = short code = PhasesManager dict key, ALL THREE MUST MATCH
+    # EXACTLY (e.g. PH1/PH1/ph["PH1"]) -- see the pulse-programme-
+    # parameters skill's phase-cycling rule.
+    PH1 = Parameter("PH1","0", ParameterTypes.String,"P1 (excitation) RF-Pulse Phase")
+    PH2 = Parameter("PH2","90,270", ParameterTypes.String,"P2 (refocus) RF-Pulse Phase [EXORCYCLE, 2-step]")
+    PHRX = Parameter("PHRX","0,180", ParameterTypes.String,"Acquisition Phase [2-step, matches PH2]")
 
 def run(comms):
 
@@ -564,17 +566,15 @@ def run(comms):
     ReceiverFilter = Filter(P.Filter)
     ReceiverTime = ReceiverFilter.dwell*(P.ReceiverPoints+0.99)
 
-    # Individual PhaseListContainer per phase Parameter, matching the
-    # vendor's own confirmed-working pattern (PGSE_H.py/WET-PRE_H.py,
-    # Default pps folder) -- NOT PhasesManager(P)/ph["PH1"]-style dict
-    # indexing, which crashed on real hardware with "KeyError: 'PH1'"
-    # (PhasesManager's returned dict is evidently NOT keyed by the raw
-    # short code) -- see changelog. Incremented phase values are named
-    # PH1/PH2/PHRX (matching the short codes exactly), since those are
-    # what get passed straight into Channel1SetBasePhase()/Receiver1Phase().
-    P1Phase = PhaseListContainer(P.P1Phase)
-    P2Phase = PhaseListContainer(P.P2Phase)
-    RXPhase = PhaseListContainer(P.RXPhase)
+    # Standard PhasesManager pattern -- matches every confirmed-working
+    # file in this repo (LWG_1D-Image-Echo_H.py etc.). The earlier
+    # "KeyError: 'PH1'" crash was caused by this file's phase Parameters
+    # being named P1Phase/P2Phase/RXPhase (attribute name != short code
+    # "PH1"/"PH2"/"PHRX") -- fixed above by renaming the attributes
+    # themselves to PH1/PH2/PHRX, matching the short code exactly, per the
+    # confirmed-working image-echo convention -- see changelog.
+    Phases = PhasesManager(P)
+    Phases.Reset()
 
     points = P.ReceiverPoints
     times = np.arange(0, points*ReceiverFilter.dwell, ReceiverFilter.dwell) / 1.0e6
@@ -630,9 +630,7 @@ def run(comms):
         # Gradient Setup
         GradientMatrix(200,Matrix.T)
 
-        P1Phase.Reset()
-        P2Phase.Reset()
-        RXPhase.Reset()
+        Phases.Reset()
 
     # ---- Probe/gradient-calibration report ---------------------------------
     report_probe_gradient(P, comms)
@@ -663,15 +661,11 @@ def run(comms):
         with sequential_main(seqScans,P.NumScans+P.DS):
 
             if seqScans == P.DS:
-                P1Phase.Reset()
-                P2Phase.Reset()
-                RXPhase.Reset()
+                Phases.Reset()
 
-            PH1 = P1Phase.Inc()
-            PH2 = P2Phase.Inc()
-            PHRX = RXPhase.Inc()
+            ph = Phases.Incd()
 
-            Channel1SetBasePhase(10, PH1)
+            Channel1SetBasePhase(10, ph["PH1"])
             Receiver1FilterFlush(200, ReceiverFilter)
             # RD -- quiet wait BEFORE the WET module starts (see design notes)
             Delay(P.RecycleDelay-9.0e4)
@@ -696,7 +690,7 @@ def run(comms):
             safe_delay(D3a, "first-TAU rest wait", comms)
 
             # P2 -- refocusing 180 (SAME gradient sign follows -- see design notes)
-            Channel1SetBasePhase(3, PH2)
+            Channel1SetBasePhase(3, ph["PH2"])
             Transmit1BlankingOn(1)
             Delay(P.TXEnableTime)
             Transmit1(P.P180)
@@ -716,7 +710,7 @@ def run(comms):
 
             # ACQU
             Channel1SetBasePhase(1,0)
-            Receiver1Phase(1, PHRX)
+            Receiver1Phase(1, ph["PHRX"])
             Delay(ReceiverFilter.dead_time)
             Receiver1(P.ReceiverPoints*ReceiverFilter.dwell, P.ReceiverPoints)
 
@@ -764,14 +758,20 @@ def run(comms):
 # 3. Claude - 14/08/26 - FIXED a second, distinct crash on real hardware:
 #    mirrors LWG_PGSTE-WET_H.py's identical fix -- "KeyError: 'PH1'" at
 #    Channel1SetBasePhase(10, ph["PH1"]), where ph = Phases.Incd() and
-#    Phases = PhasesManager(P). PhasesManager's returned dict is evidently
-#    NOT keyed by the raw short code "PH1"/"PH2"/"PHRX" the way this file
-#    (and this repo generally) assumed. Switched to individual
-#    PhaseListContainer objects per phase Parameter (P1Phase/P2Phase/
-#    RXPhase), matching the vendor's own confirmed-working pattern
-#    (PGSE_H.py/WET-PRE_H.py, Default pps folder) instead of going through
-#    PhasesManager at all. Incremented per-scan phase values are named
-#    PH1/PH2/PHRX -- matching the short codes exactly. Verified via the
-#    mock harness (no exception, full scan loop completes).
+#    Phases = PhasesManager(P). Root cause: this file's phase-cycle
+#    Parameters were declared as P1Phase = Parameter("PH1", ...) --
+#    Python attribute name "P1Phase" != SpinFlow short code "PH1". Every
+#    CONFIRMED-WORKING file in this repo (LWG_1D-Image-Echo_H.py and all
+#    the imaging/selective sequences) instead declares these with the
+#    attribute name, short code, AND PhasesManager dict key all IDENTICAL
+#    (PH1 = Parameter("PH1", ...), then ph["PH1"]). FIXED by renaming the
+#    attributes themselves from P1Phase/P2Phase/RXPhase to PH1/PH2/PHRX
+#    (matching the short code exactly) and going back through the
+#    standard PhasesManager(P)/Phases.Incd()/ph["PH1"] pattern -- NOT
+#    bypassing PhasesManager (an earlier attempt at this fix, in this same
+#    commit history, wrongly did that; see the pulse-programme-parameters
+#    skill's "phase-cycling naming symmetry" rule for the corrected,
+#    permanent guidance). Verified via the mock harness (no exception,
+#    full scan loop completes).
 #
 # -----------------------------------------------------------------------------

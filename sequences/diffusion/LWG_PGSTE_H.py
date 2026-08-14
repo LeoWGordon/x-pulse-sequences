@@ -13,7 +13,7 @@
 #
 # Created:     06/08/2026
 # Copyright:   (c) Oxford Instruments Magnetic Resonance, 2013-
-# Version:     1.3
+# Version:     1.4
 #
 # Design notes:
 #  - Structurally a NEAR-VERBATIM port of the vendor's PGSE_H.py (three-pulse
@@ -405,11 +405,14 @@ class Parameters:
     # Phases -- taken directly from Bruker's diffSte pulse programme
     # (ph1/ph2/ph3/ph31), converted from quarter-cycle to degrees. See
     # design notes for the full derivation. PH1/PHRX: 16 steps. PH2/PH3:
-    # 4 steps (repeat 4x per PH1/PHRX cycle).
-    P1Phase = Parameter("PH1","0,0,0,0,180,180,180,180,90,90,90,90,270,270,270,270", ParameterTypes.String,"P1 (excitation) RF-Pulse Phase [Bruker diffSte ph1, 16-step]")
-    P2Phase = Parameter("PH2","90,270,0,180", ParameterTypes.String,"P2 (storage) RF-Pulse Phase [Bruker diffSte ph2, 4-step]")
-    P3Phase = Parameter("PH3","90,270,0,180", ParameterTypes.String,"P3 (restore) RF-Pulse Phase [Bruker diffSte ph3, 4-step]")
-    RXPhase = Parameter("PHRX","0,0,180,180,180,180,0,0,270,270,90,90,90,90,270,270", ParameterTypes.String,"Acquisition Phase [Bruker diffSte ph31, 16-step]")
+    # 4 steps (repeat 4x per PH1/PHRX cycle). Attribute name = short code
+    # = PhasesManager dict key, ALL THREE MUST MATCH EXACTLY (e.g.
+    # PH1/PH1/ph["PH1"]) -- see the pulse-programme-parameters skill's
+    # phase-cycling rule.
+    PH1 = Parameter("PH1","0,0,0,0,180,180,180,180,90,90,90,90,270,270,270,270", ParameterTypes.String,"P1 (excitation) RF-Pulse Phase [Bruker diffSte ph1, 16-step]")
+    PH2 = Parameter("PH2","90,270,0,180", ParameterTypes.String,"P2 (storage) RF-Pulse Phase [Bruker diffSte ph2, 4-step]")
+    PH3 = Parameter("PH3","90,270,0,180", ParameterTypes.String,"P3 (restore) RF-Pulse Phase [Bruker diffSte ph3, 4-step]")
+    PHRX = Parameter("PHRX","0,0,180,180,180,180,0,0,270,270,90,90,90,90,270,270", ParameterTypes.String,"Acquisition Phase [Bruker diffSte ph31, 16-step]")
 
 def run(comms):
 
@@ -630,5 +633,21 @@ def run(comms):
 #    208 (fixed small-instruction overhead). Verified via the mock
 #    harness (67936352.0us at default Parameters, matching an independent
 #    symbolic derivation exactly).
+# 7. Claude - 14/08/26 - FIXED a latent "KeyError: 'PH1'" crash (found via
+#    the hardened mock harness, after an identical crash was confirmed on
+#    real hardware in the newer LWG_PGSTE-WET_H.py, which was forked from
+#    this file and inherited the same bug). Root cause: phase-cycle
+#    Parameters were declared as P1Phase = Parameter("PH1", ...) -- Python
+#    attribute name "P1Phase" != SpinFlow short code "PH1" != the
+#    ph["PH1"] key used at Channel1SetBasePhase(10, ph["PH1"]). Every
+#    CONFIRMED-WORKING file in this repo (LWG_1D-Image-Echo_H.py and all
+#    the imaging/selective sequences) instead declares these with
+#    attribute name == short code == PhasesManager dict key, all
+#    identical (PH1 = Parameter("PH1", ...)). FIXED by renaming the
+#    attributes themselves from P1Phase/P2Phase/P3Phase/RXPhase to
+#    PH1/PH2/PH3/PHRX (matching the short code exactly) -- run()'s
+#    PhasesManager(P)/Phases.Incd()/ph["PH1"] logic was already correct
+#    and unchanged. Verified via the mock harness (previously failed with
+#    this exact KeyError; now completes the full scan loop).
 #
 # -----------------------------------------------------------------------------

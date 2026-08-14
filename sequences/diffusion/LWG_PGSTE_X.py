@@ -14,7 +14,7 @@
 #
 # Created:     06/08/2026
 # Copyright:   (c) Oxford Instruments Magnetic Resonance, 2013-
-# Version:     1.3
+# Version:     1.4
 #
 # X-CHANNEL CALIBRATION -- IMPORTANT: this is a mechanical H->X port (all
 # Channel1/Transmit1/Receiver1/TX0 -> Channel2/Transmit2/Receiver2/TX1, per
@@ -414,11 +414,14 @@ class Parameters:
     # Phases -- taken directly from Bruker's diffSte pulse programme
     # (ph1/ph2/ph3/ph31), converted from quarter-cycle to degrees. See
     # design notes for the full derivation. PH1/PHRX: 16 steps. PH2/PH3:
-    # 4 steps (repeat 4x per PH1/PHRX cycle).
-    P1Phase = Parameter("PH1","0,0,0,0,180,180,180,180,90,90,90,90,270,270,270,270", ParameterTypes.String,"P1 (excitation) RF-Pulse Phase [Bruker diffSte ph1, 16-step]")
-    P2Phase = Parameter("PH2","90,270,0,180", ParameterTypes.String,"P2 (storage) RF-Pulse Phase [Bruker diffSte ph2, 4-step]")
-    P3Phase = Parameter("PH3","90,270,0,180", ParameterTypes.String,"P3 (restore) RF-Pulse Phase [Bruker diffSte ph3, 4-step]")
-    RXPhase = Parameter("PHRX","0,0,180,180,180,180,0,0,270,270,90,90,90,90,270,270", ParameterTypes.String,"Acquisition Phase [Bruker diffSte ph31, 16-step]")
+    # 4 steps (repeat 4x per PH1/PHRX cycle). Attribute name = short code
+    # = PhasesManager dict key, ALL THREE MUST MATCH EXACTLY (e.g.
+    # PH1/PH1/ph["PH1"]) -- see the pulse-programme-parameters skill's
+    # phase-cycling rule.
+    PH1 = Parameter("PH1","0,0,0,0,180,180,180,180,90,90,90,90,270,270,270,270", ParameterTypes.String,"P1 (excitation) RF-Pulse Phase [Bruker diffSte ph1, 16-step]")
+    PH2 = Parameter("PH2","90,270,0,180", ParameterTypes.String,"P2 (storage) RF-Pulse Phase [Bruker diffSte ph2, 4-step]")
+    PH3 = Parameter("PH3","90,270,0,180", ParameterTypes.String,"P3 (restore) RF-Pulse Phase [Bruker diffSte ph3, 4-step]")
+    PHRX = Parameter("PHRX","0,0,180,180,180,180,0,0,270,270,90,90,90,90,270,270", ParameterTypes.String,"Acquisition Phase [Bruker diffSte ph31, 16-step]")
 
 def run(comms):
 
@@ -627,5 +630,14 @@ def run(comms):
 #    2*TXEnableTime + group_delay + points*DW + 208. Verified via the
 #    mock harness against LWG_PGSTE_H.py's result at matching default
 #    Parameters (67936352.0us, identical).
+# 7. Claude - 14/08/26 - FIXED a latent "KeyError: 'PH1'" crash: mirrors
+#    LWG_PGSTE_H.py's identical fix -- phase-cycle Parameters were
+#    declared as P1Phase = Parameter("PH1", ...) (attribute name != short
+#    code != the ph["PH1"] key used in run()). Renamed the attributes
+#    themselves from P1Phase/P2Phase/P3Phase/RXPhase to PH1/PH2/PH3/PHRX,
+#    matching the short code exactly, per the confirmed-working
+#    image-echo convention (see the pulse-programme-parameters skill's
+#    phase-cycling rule). Verified via the mock harness (previously
+#    failed with this exact KeyError; now completes the full scan loop).
 #
 # -----------------------------------------------------------------------------

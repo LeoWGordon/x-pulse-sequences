@@ -1,6 +1,6 @@
 ---
 name: pulse-programme-parameters
-description: Conventions for writing/editing Parameter(...) blocks in this repo's X-Pulse pulse programmes (SpinFlow XML safety, panel-width-aware descriptions, refocusing naming). Load whenever adding, editing, or reviewing a Parameters block or Parameter() call in sequences/**/*.py.
+description: Conventions for writing/editing Parameter(...) blocks in this repo's X-Pulse pulse programmes (SpinFlow XML safety, panel-width-aware descriptions, refocusing naming, phase-cycle Parameter/PhasesManager naming symmetry). Load whenever adding, editing, or reviewing a Parameters block or Parameter() call in sequences/**/*.py.
 ---
 
 # Pulse programme Parameter conventions
@@ -60,10 +60,39 @@ This bug was invisible for as long as `PulseOffset` stayed at its default of `0.
 - Whenever two Parameters (or a Parameter and a hardware call's fixed argument) are combined arithmetically, explicitly check they're in the same unit before combining, and comment the conversion inline if one is needed (see the `pulse_offset*1.0e-6` fix for the exact style).
 - Don't trust "it worked in testing" as proof a formula is unit-correct if every test happened to use a zero/default value for one of the operands. Test with a real nonzero value for every Parameter that's supposed to matter before considering a sequence validated.
 
-## 7. Never name a non-cycled Parameter attribute ending in "Phase" — `PhasesManager` auto-discovers it and assumes it's a comma-separated list
+## 7. Never name a non-cycled Parameter attribute "PH..." or ending in "Phase" — `PhasesManager` auto-discovers it and assumes it's a comma-separated list
 
-Real crash found 14/08/2026 (full traceback supplied by the user from the instrument itself), in `LWG_PGSTE-WET_H.py`/`LWG_PGSE-WET_H.py`'s first version: a WET module's fixed pulse-phase Parameter was named `WetPhase = Parameter("WetPhase", 0.0, ParameterTypes.Double, ...)`. `PhasesManager(P)` — called as the very first line of `run()`, before any sequence-specific code — auto-discovers **every** Parameter attribute whose name ends in the literal substring `"Phase"` (matching the legitimate `P1Phase`/`P2Phase`/`P3Phase`/`RXPhase` convention used throughout this repo) and unconditionally tries to parse its value as a comma-separated integer list via `PhaseListContainer(value.split(","))`. It does this **regardless of the Parameter's declared type** — a `Double`/`Int32`-typed Parameter whose name merely happens to end in "Phase" gets swept in exactly the same as a real phase-cycle string, and crashes with `AttributeError: 'float' object has no attribute 'split'` (or `'int' object has no attribute 'split'`) deep inside `PhasesManager.__init__`, before `run()`'s own logic even starts.
+Real crash found 14/08/2026 (full traceback supplied by the user from the instrument itself), in `LWG_PGSTE-WET_H.py`/`LWG_PGSE-WET_H.py`'s first version: a WET module's fixed pulse-phase Parameter was named `WetPhase = Parameter("WetPhase", 0.0, ParameterTypes.Double, ...)`. `PhasesManager(P)` — called as the very first line of `run()`, before any sequence-specific code — auto-discovers **every** Parameter attribute that looks like a phase-cycle Parameter (name starts with `"PH"`, matching the legitimate `PH1`/`PH2`/`PH3`/`PHRX` convention — see rule 8 — or ends in `"Phase"`, a legacy/secondary match) and unconditionally tries to parse its value as a comma-separated integer list via `PhaseListContainer(value.split(","))`. It does this **regardless of the Parameter's declared type** — a `Double`/`Int32`-typed Parameter whose name matches gets swept in exactly the same as a real phase-cycle string, and crashes with `AttributeError: 'float' object has no attribute 'split'` (or `'int' object has no attribute 'split'`) deep inside `PhasesManager.__init__`, before `run()`'s own logic even starts.
 
-- **Never end a Parameter's Python attribute name in "Phase"** unless it genuinely holds a comma-separated, `PhasesManager`-cycled integer-degree list (like `P1Phase`/`RXPhase`). For any other angle/phase-like value (e.g. a single fixed transmit phase for a non-cycled shaped pulse), pick a name that doesn't end in that substring — e.g. `WetAngle` (short code `WETANG`), not `WetPhase`.
-- This is a **name-pattern match, not a type check** — `RephaseFraction` (short code `RephaseFrac`) is safe precisely because its attribute name ends in `"Fraction"`, not `"Phase"`, even though it contains "phase" as a substring elsewhere in the word. The ENDING is what matters, matching how `PhasesManager` appears to scan for its known suffix.
-- The mock hardware harness's `PhasesManager` (see §9's reference skeleton) has been hardened to reproduce this exact check — it raises the same `AttributeError` locally for any non-string `"...Phase"`-suffixed attribute, so this class of bug is now caught before deployment rather than on the instrument. If you rebuild the mock harness from scratch, make sure to carry this check over (see `LWG_PGSTE-WET_H.py`'s or `LWG_PGSE-WET_H.py`'s changelog for the exact patched mock code).
+- **Never start a Parameter's Python attribute name with "PH" or end it in "Phase"** unless it genuinely holds a comma-separated, `PhasesManager`-cycled integer-degree list (like `PH1`/`PHRX` — see rule 8 for the required naming). For any other angle/phase-like value (e.g. a single fixed transmit phase for a non-cycled shaped pulse), pick a name that doesn't match either pattern — e.g. `WetAngle` (short code `WETANG`), not `WetPhase`.
+- This is a **name-pattern match, not a type check** — `RephaseFraction` (short code `RephaseFrac`) is safe precisely because its attribute name ends in `"Fraction"` (not `"Phase"`) and doesn't start with `"PH"`, even though it contains "phase" as a substring elsewhere in the word.
+- The mock hardware harness's `PhasesManager` (see the global `xpulse-pulse-programmes` skill's reference skeleton) has been hardened to reproduce this exact check — it raises the same `AttributeError` locally for any non-string Parameter whose name starts with `"PH"` or ends in `"Phase"`, so this class of bug is now caught before deployment rather than on the instrument. If you rebuild the mock harness from scratch, make sure to carry this check over (see `LWG_PGSTE-WET_H.py`'s or `LWG_PGSE-WET_H.py`'s changelog for the exact patched mock code).
+
+## 8. Genuine phase-cycle Parameters: ALWAYS use `PhasesManager`, and the attribute name, short code, and `Incd()` dict key must all be IDENTICAL
+
+Real crash found 14/08/2026 on real hardware (full traceback supplied by the user): `KeyError: 'PH1'` at `Channel1SetBasePhase(10, ph["PH1"])`, where `ph = Phases.Incd()` and `Phases = PhasesManager(P)`. Root cause: the phase-cycle Parameter had been declared as `P1Phase = Parameter("PH1", ...)` — Python attribute name `"P1Phase"` did not match the SpinFlow short code `"PH1"`. `PhasesManager.Incd()` returns a dict keyed by the Parameter's **attribute name**, not its short code — so `ph["PH1"]` raised `KeyError` because no attribute named `"PH1"` existed (it was named `"P1Phase"`).
+
+This bug was present in this repo's diffusion sequences (`LWG_PGSTE_H.py`, `LWG_PGSTE_X.py`, and the newly-added `LWG_PGSTE-WET_H.py`/`LWG_PGSE-WET_H.py`) but **not** in any of the imaging/selective sequences, which is why it went unnoticed for weeks: every confirmed-working file in `sequences/imaging/**` and `sequences/selective/**` (e.g. `LWG_1D-Image-Echo_H.py`) already declares phase-cycle Parameters correctly:
+
+```python
+PH1 = Parameter("PH1", "0,180,90,270,180,0,270,90", ParameterTypes.String, "H/F 180&#176; Pulse Phase")
+PH2 = Parameter("PH2", "0", ParameterTypes.String, "H/F 180&#176; Pulse Phase")
+PHRX = Parameter("PHRX", "0,180,270,90,180,0,90,270", ParameterTypes.String, "Acquisition Phase")
+```
+
+then in `run()`:
+
+```python
+Phases = PhasesManager(P)
+Phases.Reset()
+...
+ph = Phases.Incd()
+Channel1SetBasePhase(10, ph["PH1"])
+```
+
+**Rules, going forward, for every genuinely phase-cycled Parameter in this repo:**
+
+- **Always route phase-cycled Parameters through `PhasesManager`/`Phases.Incd()`/`ph["PH..."]`.** Do not hand-roll individual `PhaseListContainer(P.SomeAttr)` objects to bypass it — that was tried as an intermediate fix for this exact bug and is explicitly the wrong pattern; it diverges from every other file in the repo and makes the code harder to review against the established convention.
+- **The Python attribute name, the Parameter's SpinFlow short code (first arg to `Parameter(...)`), and the string used to index `Phases.Incd()`'s result must all be identical**, e.g. `PH1 = Parameter("PH1", ...)` then `ph["PH1"]` — never `P1Phase = Parameter("PH1", ...)`. Use `PH1`/`PH2`/`PH3`/`PH4`/`PHRX` (not `P1Phase`/`RXPhase`-style names) for every new phase-cycle Parameter.
+- When adding a new pulse programme (or a new phase-cycle Parameter to an existing one), copy the exact declaration + `run()` pattern from a confirmed-working file (`LWG_1D-Image-Echo_H.py` is the cleanest reference) rather than inferring the convention from a diffusion-folder file, since the diffusion files were the ones that had drifted from it.
+- The mock hardware harness's `PhasesManager` has been rebuilt to model this precisely: it discovers attributes matching rule 7's pattern, builds real `PhaseListContainer`s keyed by **attribute name**, and `Incd()` returns a genuine `dict` (not a permissive default) — so a `P1Phase`/`"PH1"` short-code mismatch now raises the same `KeyError` locally that it would on real hardware, instead of being silently masked.
