@@ -33,3 +33,13 @@ Traceback (most recent call last):
   File "/home/fire/PythonMonitor/firebird/parallel/utils.py", line 450, in __init__
     self._list = [ int(x) for x in s.split(",") ]
 AttributeError: 'float' object has no attribute 'split'
+
+14/08/2026 11:45:20 Warning: No parameter file, using system defaults. Missing parameter file: 'C:\Users\Public\Documents\SpinFlow\Parameters\82863\User\1H\fid-shape-LP_H.par'
+14/08/2026 11:45:22 Warning: No parameter file, using system defaults. Missing parameter file: 'C:\Users\Public\Documents\SpinFlow\Parameters\82863\User\1H\LWG_PGSTE-WET_H.par'
+14/08/2026 11:45:56 Error  : An exception occurred when running the sequence:
+Traceback (most recent call last):
+  File "monitor.py", line 283, in LaunchSequence
+    sequence.run(comms)
+  File "/tmp/tmppoVHU5.py", line 699, in run
+    Channel1SetBasePhase(10, ph["PH1"])
+KeyError: 'PH1'
