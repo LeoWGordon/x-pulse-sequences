@@ -15,7 +15,7 @@
 #
 # Created:     10/08/2026
 # Copyright:   (c) Oxford Instruments Magnetic Resonance, 2013-
-# Version:     1.0
+# Version:     1.1
 # status:      draft
 #
 # Design notes:
@@ -365,7 +365,7 @@ def wet_suppression(P, comms, Frequency):
 
     for amp, spoil in ((P.WetAmp1, P.WetSpoil1), (P.WetAmp2, P.WetSpoil2),
                         (P.WetAmp3, P.WetSpoil3), (P.WetAmp4, P.WetSpoil4)):
-        shaped_pulse(P.WetPulseWidth, P.WetPhase, P.WetShape, amp,
+        shaped_pulse(P.WetPulseWidth, P.WetAngle, P.WetShape, amp,
                      P.TXEnableTime, Frequency, WetOffsetHz)
         Gradient3SlewRate(1.0, abs(spoil/P.WetRampTime))
         Gradient3(P.WetRampTime, spoil)
@@ -506,7 +506,15 @@ class Parameters:
     WetOn = Parameter("WetOn", 1, ParameterTypes.Int32, "Enable WET water suppression [1=On(default), 0=Off]")
     WetOffsetPPM = Parameter("WetOffsetPPM", 4.7, ParameterTypes.Double, "*** WET target [ppm] rel. SF+O1 -- SET to your water peak ***")
     WetShape = Parameter("WetShape", "GAUSSIAN", ParameterTypes.String, "WET Pulse Shape [GAUSSIAN(default)/SINC]")
-    WetPhase = Parameter("WetPhase", 0.0, ParameterTypes.Double, "WET Pulse Phase [&#176;] -- same for all 4, spoiled after each so phase doesn't matter")
+    # NOTE: attribute name deliberately does NOT end in "Phase" -- SpinFlow's
+    # PhasesManager auto-discovers ANY Parameter whose attribute name ends
+    # with "Phase" (matching P1Phase/P2Phase/RXPhase above) and
+    # unconditionally tries to parse its value as a comma-separated integer
+    # phase-cycle list, regardless of declared type. A first version of this
+    # file named this WetPhase and crashed on real hardware with
+    # "AttributeError: 'float' object has no attribute 'split'" inside
+    # PhasesManager.__init__ -- see changelog.
+    WetAngle = Parameter("WETANG", 0.0, ParameterTypes.Double, "WET Pulse Phase [&#176;] -- same for all 4, spoiled after each so phase doesn't matter")
     WetPulseWidth = Parameter("WetP90sh", 20000.0, ParameterTypes.Double, "WET Shaped Pulse Width [&#956;s] -- sets excitation BW (~110Hz FWHM default, R_GAUSSIAN_90=2.2)")
     WetAmp1 = Parameter("WetAmp1", _DEFAULT_WET_AMP1, ParameterTypes.Double,
                         "WET Pulse 1 TX Power [0&#8230;1 of LP max] -- 81.4&#176; flip, CALIBRATE by nulling water", RFA, min=0.0, max=1.0)
@@ -534,7 +542,7 @@ class Parameters:
     MainsLockChannel = Parameter("MainsLockChannel", 2, ParameterTypes.Int32, "Mains-Lock Trigger Channel [1-3, unconfirmed for X-Pulse]")
 
     # Phases -- simple EXORCYCLE-style 2-step cycle (see design notes). The
-    # WET module's own WetPhase (above) is fixed, not cycled.
+    # WET module's own WetAngle (above) is fixed, not cycled.
     P1Phase = Parameter("PH1","0", ParameterTypes.String,"P1 (excitation) RF-Pulse Phase")
     P2Phase = Parameter("PH2","90,270", ParameterTypes.String,"P2 (refocus) RF-Pulse Phase [EXORCYCLE, 2-step]")
     RXPhase = Parameter("PHRX","0,180", ParameterTypes.String,"Acquisition Phase [2-step, matches PH2]")
@@ -726,5 +734,17 @@ def run(comms):
 #    zero added time/RF/gradient. Verified via the mock harness, cross-
 #    checked symbolically (sympy) against LWG_PGSTE-WET_H.py's own
 #    derivation method for consistency.
+# 2. Claude - 14/08/26 - FIXED a real crash on real hardware: mirrors
+#    LWG_PGSTE-WET_H.py's identical fix -- the WET pulse-phase Parameter
+#    was originally named WetPhase (attribute AND short code), which
+#    collided with SpinFlow's PhasesManager auto-discovery of any
+#    Parameter attribute ending in "Phase" (matching P1Phase/P2Phase/
+#    RXPhase, genuinely comma-separated lists), crashing with
+#    "AttributeError: 'float' object has no attribute 'split'" inside
+#    PhasesManager.__init__ before any WET-specific code even ran (you
+#    supplied the full instrument traceback, which identified the exact
+#    mechanism). Renamed to WetAngle (short code WETANG). Also hardened
+#    the mock hardware harness's PhasesManager to reproduce this exact
+#    check locally, so this class of bug is caught before deployment.
 #
 # -----------------------------------------------------------------------------
