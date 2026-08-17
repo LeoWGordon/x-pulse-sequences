@@ -1,0 +1,471 @@
+#-------------------------------------------------------------------------------
+# Name:        LWG_CPMG_H.py
+# Purpose:     Basic Carr-Purcell-Meiboom-Gill (CPMG) multi-echo train for T2
+#              relaxometry: hard-90, then NECH hard-180 refocusing pulses at
+#              fixed short spacing 2*TAU, with a SINGLE acquisition right
+#              after the LAST refocusing pulse. NO gradients/imaging/slice-
+#              selection. X-Pulse Broadband Benchtop NMR Spectrometer
+#              (1H/19F channel).
+#
+#              INTENDED USE: run this sequence as a quasi-2D / VC-list sweep
+#              of NECH (e.g. 1, 2, 4, 8, 16, 32, ...) at a SMALL, FIXED TAU,
+#              exactly per the vendor's own CPMG_H.py header note ("quasi 2D
+#              experiment (FFT data [ppm] vs. EchoNumber)"). Echo intensity
+#              vs. TE ~= NECH*2*TAU gives a T2 decay curve with short, fixed
+#              echo spacing -- far less sensitive to diffusion attenuation
+#              than directly increasing TAU (see LWG_Hahn-Echo_H.py, this
+#              file's sibling, for that comparison sequence and the "HAHN
+#              ECHO vs. CPMG" design note there).
+#
+# Author:      Claude, for L. Gordon (DTU)
+#
+# Created:     17/08/2026
+# Copyright:   (c) Oxford Instruments Magnetic Resonance, 2013-
+# Version:     1.0 (draft) -- NOT YET RUN ON HARDWARE. Per this repo's
+#              README: no AI-assisted sequence is used for real data
+#              collection until a named person has reviewed and validated it
+#              on the instrument.
+# status: draft
+#
+# Design notes:
+#  - Structurally identical to sequences/imaging/LWG_CPMG-Image-Echo_H.py's
+#    own NECH-1 "blind" refocusing-pulse loop (single sequential timeline,
+#    no gradient, no acquisition on the blind pulses), but WITHOUT that
+#    file's imaging/gradient machinery on the final echo either -- this file
+#    just acquires a plain FID after the final refocusing pulse, exactly
+#    like the vendor's own (non-imaging) CPMG_H.py (Created 10/09/2013,
+#    Author AS, supplied by L. Gordon 11/08/2026). pulse()/_first_gap()/
+#    _subsequent_gap()/the 8-step Meiboom-Gill phase cycle (PH1/PH2/PHRX)/
+#    the post-refocus-wait formula are all copied verbatim from that
+#    provenance chain -- see LWG_CPMG-Image-Echo_H.py's design notes for the
+#    full history.
+#  - NECH=1 reduces this file to EXACTLY LWG_Hahn-Echo_H.py's sequence (one
+#    excitation, one gap, one refocusing pulse, one acquisition) -- the two
+#    files' time_calculation() formulas are verified to agree exactly at
+#    NECH=1 (see time_calculation()'s comment below).
+#  - POST-REFOCUS WAIT: uses the vendor's own plain-spectroscopy formula
+#    (Tau - P180/2 - dead_time + group_delay - 3) for the FINAL (acquired)
+#    echo only -- there is no gradient anywhere in this file, so there is no
+#    gradient-echo-centring formula to consider (unlike
+#    LWG_CPMG-Image-Echo_H.py, which needed a different formula for its
+#    imaged, gradient-carrying final echo).
+#  - DUTY CYCLE: RF duty cycle scales with NECH (P90 once + P180 x NECH per
+#    scan) -- see estimate_rf_duty_cycle() below. No gradient duty cycle to
+#    track (no gradients in this file).
+#
+# Changes/Modifications: At end of file.
+#-------------------------------------------------------------------------------
+
+from firebird import *
+from firebird.applications import *
+import numpy as np
+import time
+global BLP
+
+BLP = 0
+
+def get_permutation(ds, ns, nb):
+    first_scans = []
+    scans_to_save = []
+    for n in range(ds+ns):
+        if (n-ds)%(ns/nb) == 0 and n >=ds-1:
+            first_scans.append(n)
+        if (n-ds+1)%(ns/nb) == 0 and n >ds-1:
+            scans_to_save.append(n)
+    return first_scans, scans_to_save
+
+class CallBack1D(object):
+#   Callback to handle one-dimensional sequences. Each scan returns exactly
+#   ReceiverPoints samples (the FINAL echo only), same shape/semantics as
+#   every other sequence in this repo.
+    def __init__(self, Params, comms, ReceiverFilter, jcamp_meta):
+
+        self.comms = comms                                      # Comms to the clients
+        self.P = Params
+        self.NS = self.P.NumScans
+        self.NBlock = self.P.NumScans                           # default NBLOCK to 1
+        self.jcamp_meta = jcamp_meta
+        self.start_time = time.time()
+        self.end_time = 0
+        if getattr(Params, "NBlock", 'nofound') != "nofound":
+            self.NBlock = getattr(Params, "NBlock")             # if defined, set to the value defined
+        self.DS = 0                                             # default DS to 0
+        if getattr(Params, "DS", 'nofound') != "nofound":
+            self.DS = getattr(Params, "DS")                     # if defined, set to the value defined
+        self.rcv_filter = ReceiverFilter                        # receiver filter
+        if getattr(Params, "TD2", 'nofound') != "nofound":
+            Points = getattr(Params, "TD2")
+        elif getattr(Params, "ReceiverPoints", 'nofound') != "nofound":
+            Points = getattr(Params, "ReceiverPoints")
+        else:
+            comms.log("{0}".format(getattr(Params, "ReceiverPoints", 'nofound')))
+
+        self.times = np.arange(0.0, Points*self.rcv_filter.dwell, self.rcv_filter.dwell) / 1.0e6
+
+        self.dummys = range(self.DS)                            # Dummy scan
+        self.first_scans, self.scan_to_save = get_permutation(self.DS, self.NS, self.NBlock)
+        self.final_scan = (self.DS + self.NS) -1                # Last scan in sequence
+
+    def process_data(self, scan, data):
+        scan_data, clipped = data
+        scaled_data = np.int32(np.round(scan_data / self.rcv_filter.gain))
+
+        if (clipped.value == 1):    #clipped
+            self.comms.log(">>>>> !! Data is Clipped!! <<<<<")
+        elif (clipped.value == 100):
+            self.comms.log(">>>>> !! IPC failed!! <<<<<")
+
+        self.acc_data = np.array(scaled_data)
+
+        if scan in self.dummys:                                                   # sort out dummy scan
+            self.comms.send_data(self.acc_data, scan+1, self.times, is_clipped=clipped,
+                is_last_update=False, metadata={"DummyScan":"true"})
+        elif (scan not in self.scan_to_save):
+            self.comms.send_data(self.acc_data, scan + 1, self.times, is_clipped=clipped,
+                                 metadata={"JCAMP":self.jcamp_meta, "nosave":"true","Preview":2})
+            if scan==self.final_scan:
+                self.comms.send_data(self.acc_data, scan + 1, self.times, is_clipped=clipped, is_last_update=(scan==self.final_scan),
+                                metadata={"JCAMP":self.jcamp_meta})
+        else: #scans_per_block'th scan, This data will be saved accumulator will be reset
+            self.comms.send_data(self.acc_data, scan + 1, self.times, is_clipped=clipped, is_last_update=(scan==self.final_scan),
+                            metadata={"JCAMP":self.jcamp_meta, "Preview":2})
+            self.acc_data = None
+        if scan == (self.DS+self.NS-1):
+            self.end_time = time.time()
+            self.comms.log("seqTime LWG_CPMG_H Estimated: {0}, Real: {1}".format(1e-6*time_calculation(Parameters), self.end_time-self.start_time))
+
+
+def check_range(pvalue, **kwargs):
+    params = {}
+    for key, value in kwargs.items():
+        params[key] = value
+    if params and "min" in params and "max" in params:
+        if pvalue < params['min'] or pvalue > params['max']:
+            return False, "Out of range."
+    return True, "OK"
+
+RD = check_range
+RFA = check_range
+
+
+def safe_delay(value, label, comms):
+    """Delay() wrapper -- raises a clear, specific error instead of a
+    silent/confusing failure if a computed delay would be negative."""
+    if value < 0:
+        msg = ("FATAL TIMING ERROR computing '{0}': delay would be {1:.2f} us "
+               "(negative). Increase TAU, or decrease P90/P180/TXEnable, "
+               "then retry.").format(label, value)
+        comms.log(msg)
+        raise ValueError(msg)
+    Delay(value)
+
+
+def mains_lock_trigger(P, comms):
+    """Optionally emit a mains-line trigger (ExternalTrigger[n]()) before the
+    first pulse event, per Pulse Sequence Programming User Manual 01-U-049
+    section 3.7.19. OFF (UseMainsLock=0) by default."""
+    if int(P.UseMainsLock) == 0:
+        return
+    triggers = {1: ExternalTrigger1, 2: ExternalTrigger2, 3: ExternalTrigger3}
+    ch = int(P.MainsLockChannel)
+    if ch not in triggers:
+        comms.log("WARNING: MainsLockChannel={0} is not 1, 2, or 3 -- mains "
+                  "lock trigger skipped.".format(ch))
+        return
+    triggers[ch]()
+
+
+def estimate_rf_duty_cycle(P, rf_on_time, comms):
+    """Log estimated RF duty cycle and warn if it exceeds MaxRFDuty
+    (conservative, editable placeholder -- confirm with Oxford Instruments).
+    No gradients in this sequence, so RF is the only duty-cycle concern.
+    UNLIKE a single echo, rf_on_time here scales with NECH -- large NECH
+    trains can push RF duty far higher than a single Hahn echo at the same
+    RD."""
+    TR = float(P.RecycleDelay)
+    rf_duty = rf_on_time / TR
+    comms.log("Estimated RF duty cycle (NECH={0}): {1:.3%} (limit {2:.1%})"
+              .format(int(P.EchoNumber), rf_duty, P.MaxRFDuty))
+    if rf_duty > P.MaxRFDuty:
+        comms.log("WARNING: estimated RF duty cycle {0:.2%} exceeds MaxRFDuty "
+                  "({1:.2%}). Consider a longer RD, shorter P90/P180, or "
+                  "smaller NECH, or confirm with Oxford Instruments that "
+                  "this is within the transmitter's rated duty cycle before "
+                  "running unattended, especially for large NECH."
+                  .format(rf_duty, P.MaxRFDuty))
+
+
+def pulse(length, phase, txenabletime):
+    """Apply a hard pulse of given length and phase. Verbatim from the
+    vendor's CPMG_H.py -- see LWG_CPMG-Image-Echo_H.py's design notes."""
+    Channel1SetBasePhase(1, phase)
+    Transmit1BlankingOn(1)
+    Delay(txenabletime)
+    Transmit1(length)
+    Transmit1BlankingOff(1)
+
+
+def _first_gap(P):
+    """Delay between P1 (excitation) and the FIRST refocusing pulse.
+    Verbatim from the vendor's CPMG_H.py."""
+    return P.Tau - P.TXEnableTime - ((P.P90+P.P180)/2.0) - 12.0
+
+
+def _subsequent_gap(P):
+    """Delay between one refocusing pulse and the next. Verbatim from the
+    vendor's CPMG_H.py."""
+    return 2.0*P.Tau - P.TXEnableTime - P.P180 - 12.0
+
+
+def time_calculation(P):
+    FilterFile = ChooseFilter(P.Filter)
+    ReceiverFilter = Filter(FilterFile)
+    points = P.ReceiverPoints
+    DW = ReceiverFilter.dwell
+    ReceiverTime = DW*(points+1)
+    N = int(P.EchoNumber)
+
+    # Exact term-by-term derivation of run()'s per-scan body (RD split
+    # across Delay(RD-9e4)+trailing Delay(9e4) sums to exactly RD;
+    # Receiver1FilterFlush(200,...) contributes 200us). Each pulse() call
+    # costs TXEnableTime+pulse_width+3 (three 1us duration-arg
+    # instructions). Summing P1 + (N-1) blind gap+pulse pairs (_first_gap
+    # for the first, _subsequent_gap for the rest) + the final gap+pulse +
+    # the post-refocus wait (Tau-P180/2-dead_time+group_delay-3, verbatim
+    # from the vendor's CPMG_H.py) and simplifying algebraically (worked by
+    # hand) gives the clean closed form below, for ANY N>=1:
+    #
+    #   t_pulse_event(N) = 2*N*Tau - 9*N + TXEnableTime + P90/2
+    #                      + group_delay + Dead1 + ReceiverTime + 2
+    #
+    # Cross-checked at N=1: reduces to 2*Tau + TXEnableTime + P90/2 +
+    # group_delay + Dead1 + ReceiverTime - 7, EXACTLY matching
+    # LWG_Hahn-Echo_H.py's own independently-derived time_calculation() --
+    # expected, since that file IS this one's N=1 case. Verified
+    # numerically via the mock harness for N=1,2,4,8,16.
+    t_pulse_event = (2.0*N*P.Tau - 9.0*N + P.TXEnableTime + P.P90/2.0
+                      + ReceiverFilter.group_delay + P.Dead1 + ReceiverTime + 2.0)
+    t_scanTime = P.RecycleDelay + 200.0 + t_pulse_event
+    t_acqTime = t_scanTime * (P.NumScans + P.DS)
+    return t_acqTime
+
+def sequence_description():
+
+    seq_desc = ("Basic CPMG multi-echo train for T2 relaxometry on the "
+                "{H/F} channel: hard-90, then NECH hard-180 refocusing "
+                "pulses at fixed short spacing 2*TAU, single acquisition "
+                "after the LAST echo. NO gradients/imaging. ARRAY NECH "
+                "(at small, fixed TAU) across separate scans to build a "
+                "T2 decay curve with minimal diffusion attenuation. "
+                "Compare against LWG_Hahn-Echo_H.py to check for diffusion "
+                "contamination in a TAU-arrayed measurement.")
+
+    return seq_desc
+
+def sequence_basic():
+
+    basic = "NS,RD,NP,Filter,TAU,NECH,P90,P180"
+
+    return basic
+
+@ParameterBlock
+class Parameters:
+
+    # Sequence name and basic parameter list for SpinFlow
+    Sequence = Parameter("Sequence", "LWG_CPMG_H", ParameterTypes.String, "Sequence Name")
+
+    # General acquisition
+    FrequencyBase = Parameter("SF", 59.7, ParameterTypes.Double, "H/F Base Freq [MHz]")
+    FrequencyOffset = Parameter("O1", 0.0, ParameterTypes.Double, "H/F Freq Offset [Hz]")
+    TxPPM = Parameter("TxPPM", 0.0, ParameterTypes.Double, "H/F TX Freq Offset [ppm]")
+
+    ReceiverPoints = Parameter("NP", 1024, ParameterTypes.Int32, "Acquisition Points")
+    ReceiverAttenuation = Parameter("RA", 34, ParameterTypes.Int32, "RX Attenuation [0&#8230;77dB]")
+    Filter = Parameter("Filter", "100000", ParameterTypes.String, "f2 Spectral Window [Hz]")
+
+    # Scans -- NumScans (and DS) should be a MULTIPLE OF 8 to complete the
+    # Meiboom-Gill phase cycle below (PH1/PH2/PHRX are 8-step lists).
+    NumScans = Parameter("NS", 8, ParameterTypes.Int32,"Scans")
+    DS = Parameter("DS", 8, ParameterTypes.Int32,"Dummy Scans")
+
+    # Hardware and other standard delays
+    Dead1 = Parameter("Dead1", 100.0, ParameterTypes.Double, "H/F Probe Ringdown Time [&#956;s]")
+    TXEnableTime = Parameter("TXEnable", 20.0, ParameterTypes.Double, "TX Enable Time [&#956;s]")
+    RecycleDelay = Parameter("RD", 2000000, ParameterTypes.Int32, "Relaxation Delay [s] -- SET >= 5x your sample's T1",
+                              RD, min=100000, max=2000000000)
+
+    # Hard pulses -- plain 90/180, HP port, no shaping. Same widths/power
+    # as LWG_Hahn-Echo_H.py for a direct comparison.
+    P90 = Parameter("P90", 9.58, ParameterTypes.Double, "H/F 90&#176; Pulse Width [&#956;s]")
+    P180 = Parameter("P180", 19.16, ParameterTypes.Double, "H/F 180&#176; Pulse Width [&#956;s]")
+    TXAmplitude = Parameter("RFA0", 0.4, ParameterTypes.Double,
+                            "H/F TX Power [0.0&#8230;1.0], SAME for P90+P180", RFA, min=0.0, max=1.0)
+
+    # Keep TAU SMALL and FIXED (unlike LWG_Hahn-Echo_H.py) -- echo spacing
+    # 2*TAU should be as short as your hardware/probe ring-down allows, to
+    # minimise diffusion attenuation between refocusing pulses.
+    Tau = Parameter("TAU", 500.0, ParameterTypes.Double,
+                     "&#964; Delay [&#956;s], half the echo spacing (2*TAU) -- keep SHORT &amp; FIXED, array NECH instead")
+
+    # *** ARRAY THIS PARAMETER (across separate scans/experiments) to
+    # measure T2 -- echo intensity vs. TE~=NECH*2*TAU gives a mono-
+    # exponential decay curve, less diffusion-attenuated than arraying TAU
+    # directly (see LWG_Hahn-Echo_H.py). ***
+    EchoNumber = Parameter("NECH", 8, ParameterTypes.Int32, "Refocusing pulses/scan [last one acquired] -- *** ARRAY THIS for T2 ***")
+
+    # Duty-cycle guard rail (RF only -- no gradients in this sequence; RF
+    # duty scales with NECH, see estimate_rf_duty_cycle()).
+    MaxRFDuty = Parameter("MaxRFDuty", 0.05, ParameterTypes.Double, "Max RF Duty Cycle Warning Threshold [0.0&#8230;1.0]")
+
+    # Mains-lock trigger -- OFF by default (see mains_lock_trigger()).
+    UseMainsLock = Parameter("UseMainsLock", 0, ParameterTypes.Int32, "Emit Mains-Lock Trigger Before Sequence [0=Off(default),1=On]")
+    MainsLockChannel = Parameter("MainsLockChannel", 2, ParameterTypes.Int32, "Mains-Lock Trigger Channel [1-3, unconfirmed for X-Pulse]")
+
+    # Phases -- 8-step Meiboom-Gill-style cycle, copied verbatim from the
+    # vendor's CPMG_H.py (same cycle LWG_Hahn-Echo_H.py uses, for direct
+    # comparability). Attribute name = short code = PhasesManager dict key,
+    # ALL THREE MUST MATCH EXACTLY -- see the pulse-programme-parameters
+    # skill's phase-cycling rule.
+    PH1 = Parameter("PH1", "0,0,180,180,90,90,270,270", ParameterTypes.String, "H/F 90&#176; Pulse Phase")
+    PH2 = Parameter("PH2", "90,270,90,270,0,180,0,180", ParameterTypes.String, "H/F 180&#176; Pulse Phase")
+    PHRX = Parameter("PHRX", "0,0,180,180,90,90,270,270", ParameterTypes.String, "Acquisition Phase")
+
+def run(comms):
+
+    P = Parameters
+    N = int(P.EchoNumber)
+    if N < 1:
+        raise ValueError("EchoNumber (NECH) must be >= 1.")
+
+    Phases = PhasesManager(P)
+    Phases.Reset()
+
+    Frequency = P.FrequencyBase + (P.FrequencyOffset*1.0e-6) + (P.FrequencyBase*P.TxPPM*1.0e-6)
+    Channel1SetFrequency(10,Frequency)
+    Channel1RestartSynth(10)
+
+    ReceiverFilter = Filter(P.Filter)
+    points = P.ReceiverPoints
+    DW = ReceiverFilter.dwell
+    ReceiverTime = DW*(points+1)
+
+    times = np.arange(0, points*DW, DW) / 1.0e6
+
+    TE = N*2.0*P.Tau
+
+    def jcamp_meta():
+        global BLP
+        if BLP == 1:
+            me_mod = 4
+            jc_blp = -2*int(round((((ReceiverFilter.dead_time/2.)+P.Dead1)/ReceiverFilter.dwell),0))
+        else:
+            me_mod = 0
+            jc_blp = 0
+        jc_data = ["jc_sf={0}".format(Frequency),
+                "jc_sf_txppm={0}".format(Frequency+(P.FrequencyBase*P.TxPPM*1.0e-6)),
+                "ME_mod={0}".format(me_mod),
+                "jc_blp={0}".format(jc_blp),
+                "jc_ns=1",
+                "jc_nech={0}".format(N),
+                "jc_te={0}".format(TE),
+                    ]
+        return jc_data
+
+    comms.log("Sequence Time: {0}".format(time_calculation(Parameters)))
+    comms.log("CPMG: NECH={0}, TAU={1}us, approx TE=NECH*2*TAU={2}us ({3:.3f} ms) -- "
+              "real hardware overhead adds a small amount on top.".format(N, P.Tau, TE, TE/1000.0))
+    seqAcqu = CallBack1D(Parameters, comms, ReceiverFilter, jcamp_meta())
+
+    def RecvCallback(acqData, scan):
+        seqAcqu.process_data(scan, acqData)
+
+    with sequential:
+
+        # Mains-lock trigger, if enabled -- must come before the first pulse
+        # event (manual 3.7.19). OFF by default; see mains_lock_trigger().
+        mains_lock_trigger(P, comms)
+
+        Transmit1SelectPort(1,1)
+        Transmit1LPEnable(1,0)
+        Delay(10000) # This is required for changing the relay state from tune mode
+        Transmit1SetScale(5, P.TXAmplitude)
+
+        Receiver1Preamp(128, P.ReceiverAttenuation)
+        Receiver1Filter(200, ReceiverFilter)
+
+        Phases.Reset()
+
+    # ---- Duty-cycle warning (RF only, no gradients here; scales with NECH) --
+    rf_on_time = P.P90 + N*P.P180
+    estimate_rf_duty_cycle(P, rf_on_time, comms)
+
+    for seqScans in range(P.NumScans+P.DS):
+        with sequential_main(seqScans,P.NumScans+P.DS):
+
+            if seqScans == P.DS:
+                Phases.Reset()
+
+            ph = Phases.Incd()
+
+            Receiver1FilterFlush(200, ReceiverFilter)
+            # RD -- quiet wait before the first pulse.
+            Delay(P.RecycleDelay-9.0e4)
+
+            # P1 -- excitation 90
+            pulse(P.P90, ph["PH1"], P.TXEnableTime)
+
+            # ---- NECH-1 blind refocusing pulses (no acquisition) --
+            # single sequential timeline, timed exactly per the vendor's
+            # CPMG_H.py. Skipped entirely when NECH==1 (that single pulse
+            # is then the final, acquired one, handled below).
+            for echo_idx in range(N-1):
+                gap = _first_gap(P) if echo_idx == 0 else _subsequent_gap(P)
+                safe_delay(gap, "blind inter-pulse gap, echo {0}".format(echo_idx+1), comms)
+                pulse(P.P180, ph["PH2"], P.TXEnableTime)
+
+            # ---- Final refocusing pulse + acquisition --------------------
+            final_gap = _first_gap(P) if N == 1 else _subsequent_gap(P)
+            safe_delay(final_gap, "final inter-pulse gap", comms)
+            pulse(P.P180, ph["PH2"], P.TXEnableTime)
+
+            # Post-refocus wait -- verbatim from the vendor's CPMG_H.py,
+            # tuned for a plain spectroscopy acquisition (compensates the
+            # receiver filter's own group delay so the echo starts
+            # cleanly). No gradient anywhere in this file, so this formula
+            # applies unmodified (unlike LWG_CPMG-Image-Echo_H.py's imaged
+            # final echo, which needed a different, gradient-aligned one).
+            safe_delay(P.Tau - P.P180/2.0 - ReceiverFilter.dead_time + ReceiverFilter.group_delay - 3,
+                       "post-refocus wait (final echo)", comms)
+
+            # ACQU
+            Channel1SetBasePhase(1,0)
+            Receiver1Phase(1, ph["PHRX"])
+            Delay(P.Dead1)
+            Delay(ReceiverFilter.dead_time)
+            Receiver1(ReceiverTime, points)
+
+        Delay(9.0e4)
+        WriteToHardware(seqScans, P.NumScans+P.DS)
+        TX0.setup_receive(points,32,scan=seqScans,circular=True)
+        start(seqScans, P.NumScans+P.DS)
+        TX0.wait_for_data(seqScans, P.NumScans+P.DS, RecvCallback)
+        comms.log("Loop = %s exec time = %s compile %s" % (seqScans, get_single_scan_execution_time(), Get_Compilation_Time()))
+
+# -----------------------------------------------------------------------------
+# Changes/Modifications (Initials - Date - Description):
+#
+# 1. Claude - 17/08/26 - Initial version. Built at your request as a basic
+#    CPMG T2 sequence with an arrayable NECH, as the direct comparison
+#    counterpart to LWG_Hahn-Echo_H.py (arrayable TAU). Reuses the vendor's
+#    CPMG_H.py pulse()/_first_gap()/_subsequent_gap()/post-refocus-wait
+#    formulas and 8-step Meiboom-Gill phase cycle verbatim, and the same
+#    NECH-1-blind-pulses-then-one-acquisition structure already validated/
+#    documented via sequences/imaging/LWG_CPMG-Image-Echo_H.py -- this file
+#    is that sequence's non-gradient, non-imaging spectroscopy sibling.
+#    time_calculation() derived exactly term-by-term (see comment),
+#    cross-checked at N=1 against LWG_Hahn-Echo_H.py's own
+#    time_calculation() (must -- and does -- match exactly, since that file
+#    is this sequence's N=1 case). Verified via the mock harness for
+#    NECH=1,2,4,8,16. DRAFT, not yet run on hardware.
+#
+# -----------------------------------------------------------------------------
