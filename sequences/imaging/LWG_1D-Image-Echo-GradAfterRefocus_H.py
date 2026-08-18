@@ -13,7 +13,7 @@
 #
 # Created:     06/08/2026
 # Copyright:   (c) Oxford Instruments Magnetic Resonance, 2013-
-# Version:     1.1 (experimental)
+# Version:     1.2 (experimental)
 #
 # WHAT CHANGED VS v3.1:
 #   v3.1 (original):  90 -- [dephase gradient, +G1] -- TAU -- 180 -- TAU --
@@ -454,7 +454,8 @@ class Parameters:
     XGradNorm = Parameter("FPX", 1.0, ParameterTypes.Double, "X Grad Scaler [0.0&#8230;1.0]")
     YGradNorm = Parameter("FPY", 1.0, ParameterTypes.Double, "Y Grad Scaler [0.0&#8230;1.0]")
     ZGradNorm = Parameter("FPZ", 1.0, ParameterTypes.Double, "Z Grad Scaler [0.0&#8230;1.0]")
-    Probe = Parameter("Probe", "HFX", ParameterTypes.String, "Probe fitted to magnet [HFX(default, calibrated)/LOWGAMMA(not yet calibrated)]")
+    Probe = Parameter("Probe", "HFX", ParameterTypes.String, "Probe fitted to magnet [HFX(default, calibrated)/Low Gamma(not yet calibrated)]")
+    ProbeList = Parameter("ProbeList", "HFX,Low Gamma", ParameterTypes.String, "Probe Options")
 
     # Sequence specific
     GradientOnTime = Parameter("D71", 1000.0, ParameterTypes.Double, "Gradient Duration [&#956;s] -- dephase lobe plateau (readout = 2*this+2*RampTime)")
@@ -689,5 +690,17 @@ def run(comms):
 #    LWG_1D-Image-Echo_H.py's 2091462.96us by exactly the expected 408us,
 #    i.e. 102us/scan x 4 scans, matching the gradient-branch structural
 #    difference between the two variants).
+#
+# 3. Claude - 18/08/26 - Added a ProbeList Parameter ("HFX,Low Gamma")
+#    paired with Probe (same convention as an existing GradAxis/
+#    GradAxisList pairing elsewhere in this repo, e.g.
+#    LWG_CPMG-Image-Echo_H.py) -- this is how this framework exposes a
+#    real dropdown (a Parameter plus a comma-separated "...List"
+#    companion), not a distinct enum ParameterType. Probe's description
+#    now reads "Low Gamma" (matching your wording) instead of "LOWGAMMA"
+#    -- report_probe_gradient()'s existing normalization (strip spaces/
+#    hyphens, uppercase) already maps that to the unchanged MAXGRAD_TABLE
+#    key "LOWGAMMA", so no table changes were needed. Purely a Parameter-
+#    panel change -- no effect on timing/hardware calls.
 #
 # -----------------------------------------------------------------------------

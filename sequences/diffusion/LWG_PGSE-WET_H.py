@@ -15,7 +15,7 @@
 #
 # Created:     10/08/2026
 # Copyright:   (c) Oxford Instruments Magnetic Resonance, 2013-
-# Version:     1.2
+# Version:     1.3
 # status:      draft
 #
 # Design notes:
@@ -491,7 +491,8 @@ class Parameters:
     # for logging/downstream Hz-to-mm conversion (see report_probe_gradient()
     # above and leonmr/xpulse_imaging.py) -- has no effect on this pp's own
     # timing/hardware calls.
-    Probe = Parameter("Probe", "HFX", ParameterTypes.String, "Probe fitted to magnet ['HFX'=calibrated, 'LOWGAMMA'=NOT YET CALIBRATED]")
+    Probe = Parameter("Probe", "HFX", ParameterTypes.String, "Probe fitted to magnet [HFX(default,calibrated)/Low Gamma(not yet calibrated)]")
+    ProbeList = Parameter("ProbeList", "HFX,Low Gamma", ParameterTypes.String, "Probe Options")
 
     # Sequence-specific timing
     Tau = Parameter("TAU", 20000.0, ParameterTypes.Double,
@@ -773,5 +774,17 @@ def run(comms):
 #    skill's "phase-cycling naming symmetry" rule for the corrected,
 #    permanent guidance). Verified via the mock harness (no exception,
 #    full scan loop completes).
+#
+# 4. Claude - 18/08/26 - Added a ProbeList Parameter ("HFX,Low Gamma")
+#    paired with Probe (same convention as an existing GradAxis/
+#    GradAxisList pairing elsewhere in this repo, e.g.
+#    LWG_CPMG-Image-Echo_H.py) -- this is how this framework exposes a
+#    real dropdown (a Parameter plus a comma-separated "...List"
+#    companion), not a distinct enum ParameterType. Probe's description
+#    now reads "Low Gamma" (matching your wording) instead of "LOWGAMMA"
+#    -- report_probe_gradient()'s existing normalization (strip spaces/
+#    hyphens, uppercase) already maps that to the unchanged MAXGRAD_TABLE
+#    key "LOWGAMMA", so no table changes were needed. Purely a Parameter-
+#    panel change -- no effect on timing/hardware calls.
 #
 # -----------------------------------------------------------------------------

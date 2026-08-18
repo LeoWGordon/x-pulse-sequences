@@ -12,7 +12,7 @@
 # Created:     04/08/2026
 # Revised:     07/08/2026
 # Copyright:   (c) Oxford Instruments Magnetic Resonance, 2013-
-# Version:     4.3
+# Version:     4.4
 #
 # IMPORTANT (v4.0): if your v3.0 profile was just 'burning a hole' at the
 # target frequency instead of forming a clean selective image, the most
@@ -922,7 +922,8 @@ class Parameters:
     # for logging/downstream Hz-to-mm conversion (see report_probe_gradient()
     # above and leonmr/xpulse_imaging.py) -- has no effect on this pp's own
     # timing/hardware calls.
-    Probe = Parameter("Probe", "HFX", ParameterTypes.String, "Probe on magnet [HFX=H/FX imaging(gradient-calibrated), LOWGAMMA=low-gamma(NOT calibrated)]")
+    Probe = Parameter("Probe", "HFX", ParameterTypes.String, "Probe on magnet [HFX=H/FX imaging(gradient-calibrated), Low Gamma=low-gamma(NOT calibrated)]")
+    ProbeList = Parameter("ProbeList", "HFX,Low Gamma", ParameterTypes.String, "Probe Options")
 
     # Sequence specific
     GradientOnTime = Parameter("D71", 1000.0, ParameterTypes.Double, "Gradient Duration [&#956;s]")
@@ -1305,5 +1306,17 @@ def run(comms):
 #     term, matching run() exactly. Verified via the mock harness: hand-
 #     derived and code-computed totals agree to the last decimal
 #     (2211412.0us at default Parameters).
+#
+# 15. Claude - 18/08/26 - Added a ProbeList Parameter ("HFX,Low Gamma")
+#    paired with Probe (same convention as an existing GradAxis/
+#    GradAxisList pairing elsewhere in this repo, e.g.
+#    LWG_CPMG-Image-Echo_H.py) -- this is how this framework exposes a
+#    real dropdown (a Parameter plus a comma-separated "...List"
+#    companion), not a distinct enum ParameterType. Probe's description
+#    now reads "Low Gamma" (matching your wording) instead of "LOWGAMMA"
+#    -- report_probe_gradient()'s existing normalization (strip spaces/
+#    hyphens, uppercase) already maps that to the unchanged MAXGRAD_TABLE
+#    key "LOWGAMMA", so no table changes were needed. Purely a Parameter-
+#    panel change -- no effect on timing/hardware calls.
 #
 # -----------------------------------------------------------------------------

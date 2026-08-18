@@ -15,7 +15,7 @@
 #
 # Created:     06/08/2026
 # Copyright:   (c) Oxford Instruments Magnetic Resonance, 2013-
-# Version:     1.5
+# Version:     1.6
 #
 # X-CHANNEL CALIBRATION -- IMPORTANT: this is a mechanical H->X port (all
 # Channel1/Transmit1/Receiver1/TX0 -> Channel2/Transmit2/Receiver2/TX1, per
@@ -292,24 +292,45 @@ def estimate_duty_cycles(P, rf_on_time, grad_on_time, comms):
 # TABLE IN SYNC with leonmr/xpulse_imaging.py's own GRADIENT_CALIBRATION
 # dict (duplicated here rather than imported, since pulse programmes can't
 # import external Python modules -- same house convention used for
-# safe_delay()/mains_lock_trigger() across this family). This sequence's
-# diffusion gradient is hard-wired to the z-axis (Matrix = diag(0,0,1) in
-# run()), so there is no GradAxis Parameter here -- axis is always 'z'.
+# safe_delay()/mains_lock_trigger() across this family). The diffusion
+# gradient axis is user-selectable (GradAxis Parameter below, default
+# 'z') -- see get_gradient_functions()/apply_gradient() in run().
 MAXGRAD_TABLE = {
     "HFX": {"x": 11.879, "y": 11.978, "z": 57.915},   # G/cm, measured/averaged 06/08/2026
     "LOWGAMMA": {"x": None, "y": None, "z": None},     # NOT YET CALIBRATED
 }
 
-def report_probe_gradient(P, comms, axis="z"):
-    """Log the max gradient strength (G/cm) for the currently-selected Probe
-    on this sequence's (fixed z-axis) diffusion gradient. Since Probe is a
+def get_gradient_functions(axisstr):
+    """Map a 'x'/'y'/'z' GradAxis string to the (SlewRate, Gradient)
+    hardware call pair for that physical axis. Matches the imaging
+    family's own get_gradient_functions() (e.g.
+    LWG_CPMG-Image-Echo_H.py) verbatim."""
+    if axisstr == 'x':
+        axis = 1
+    elif axisstr == 'y':
+        axis = 2
+    elif axisstr == 'z':
+        axis = 3
+    else:
+        exit()
+
+    gradient_map = {
+        1: (Gradient1SlewRate, Gradient1),
+        2: (Gradient2SlewRate, Gradient2),
+        3: (Gradient3SlewRate, Gradient3),
+    }
+    return gradient_map[axis]
+
+def report_probe_gradient(P, comms, axis=None):
+    """Log the max gradient strength (G/cm) for the currently-selected
+    Probe and diffusion-gradient axis (GradAxis). Since Probe is a
     Parameter, this also gets auto-recorded in the resulting JCAMP file's
     SpinFlow parameter block -- letting leonmr/xpulse_imaging.py convert Hz
     to mm later without the operator having to remember/re-enter which
     probe was fitted for a given experiment. Warns (does not fail) if the
-    fitted probe's z-axis has no calibration yet."""
+    fitted probe's selected axis has no calibration yet."""
     probe_key = str(P.Probe).upper().replace('/', '').replace('-', '').replace(' ', '').replace('_', '')
-    axis_key = str(axis).strip().lower()
+    axis_key = str(axis if axis is not None else getattr(P, "Axis", "z")).strip().lower()
     if probe_key not in MAXGRAD_TABLE:
         comms.log("WARNING: unrecognised Probe='{0}'. Known probes: {1}. "
                   "Hz->mm conversion will not know this probe's gradient "
@@ -371,7 +392,7 @@ def sequence_description():
 
 def sequence_basic():
 
-    basic = "NS,RD,NP,Filter,DELTA,delta,G1"
+    basic = "NS,RD,NP,Filter,DELTA,delta,G1,GradAxis"
 
     return basic
 
@@ -410,17 +431,27 @@ class Parameters:
 
     # Gradients -- same G1 amplitude used for BOTH the encode and decode
     # gradient pulses (see design notes: DO NOT flip sign between them).
+    # GradAxis selects WHICH physical gradient coil (x/y/z) is driven (see
+    # get_gradient_functions()); FPX/FPY/FPZ are the ONLY place per-axis
+    # calibration is applied, via GradientMatrix() in run().
     G1 = Parameter("G1", 1.0, ParameterTypes.Double, "Diffusion Gradient Strength [-1.0&#8230;1.0]")
     delta = Parameter("delta", 4000.0, ParameterTypes.Double, "Gradient Duration [&#956;s] -- Stejskal-Tanner &#948; (plateau only, ramps separate)")
     RampTime = Parameter("D70", 500.0, ParameterTypes.Double, "Gradient Ramp Time [&#956;s]")
     GradSettle = Parameter("D73", 100.0, ParameterTypes.Double, "Gradient Settling Duration [&#956;s]")
     PreGrad = Parameter("D75", 1000.0, ParameterTypes.Double, "Pre-Gradient Time (delay from pulse to gradient start) [&#956;s]")
+    Axis = Parameter("GradAxis", "z", ParameterTypes.String, "Diffusion Gradient Axis")
+    AxisList = Parameter("GradAxisList", "x,y,z", ParameterTypes.String, "Gradient Axes")
+    XGradNorm = Parameter("FPX", 1.0, ParameterTypes.Double, "X Grad Scaler [0.0&#8230;1.0]")
+    YGradNorm = Parameter("FPY", 1.0, ParameterTypes.Double, "Y Grad Scaler [0.0&#8230;1.0]")
+    ZGradNorm = Parameter("FPZ", 1.0, ParameterTypes.Double, "Z Grad Scaler [0.0&#8230;1.0]")
     # Probe fitted to the magnet -- no automatic detection is possible, so
     # this must be set MANUALLY to match what's actually mounted. Used only
     # for logging/downstream Hz-to-mm conversion (see report_probe_gradient()
     # above and leonmr/xpulse_imaging.py) -- has no effect on this pp's own
-    # timing/hardware calls.
-    Probe = Parameter("Probe", "HFX", ParameterTypes.String, "Probe fitted to magnet ['HFX'=calibrated, 'LOWGAMMA'=NOT YET CALIBRATED]")
+    # timing/hardware calls. ProbeList pairs with Probe (same convention as
+    # GradAxisList/GradAxis) to give SpinFlow the actual dropdown choices.
+    Probe = Parameter("Probe", "HFX", ParameterTypes.String, "Probe fitted to magnet [HFX(default,calibrated)/Low Gamma(not yet calibrated)]")
+    ProbeList = Parameter("ProbeList", "HFX,Low Gamma", ParameterTypes.String, "Probe Options")
 
     # Sequence-specific timing -- DELTA is the ONLY diffusion-time knob (see
     # design notes: this is Bruker diffSte's own "d5: DELTA remainder"
@@ -453,10 +484,14 @@ def run(comms):
 
     P = Parameters
 
+    FPX = P.XGradNorm
+    FPY = P.YGradNorm
+    FPZ = P.ZGradNorm
+
     Matrix = np.array([
-            [0,  0,  0],
-            [0  ,0,  0],
-            [0  ,0,1.0]
+            [FPX,  0,  0],
+            [0  ,FPY,  0],
+            [0  ,  0,FPZ]
             ])
 
     Frequency = P.FrequencyBase + (P.FrequencyOffset*1.0e-6) + (P.FrequencyBase*P.TxPPM*1.0e-6)
@@ -474,6 +509,7 @@ def run(comms):
 
     GradWidth = 2*P.RampTime + P.delta
     GradientSlewRate = abs(P.G1/P.RampTime)
+    GradientSlewRateFn, GradientFn = get_gradient_functions(P.Axis)
 
     def jcamp_meta():
         global BLP
@@ -547,11 +583,11 @@ def run(comms):
             # straight into P2, no separate "rest of window" delay (see
             # design notes: the old independent TAU Parameter is gone).
             safe_delay(P.PreGrad-2-(P.P90/2.), "pre-grad-1 wait", comms)
-            Gradient3SlewRate(1.0, GradientSlewRate)
-            Gradient3(P.RampTime, P.G1)
+            GradientSlewRateFn(1.0, GradientSlewRate)
+            GradientFn(P.RampTime, P.G1)
             Delay(P.delta)
-            Gradient3(P.RampTime, 0)
-            Gradient3(1,0) # Turn Gradient off explicitly for safety
+            GradientFn(P.RampTime, 0)
+            GradientFn(1,0) # Turn Gradient off explicitly for safety
             Delay(P.GradSettle)
 
             # P2 -- storage 90 (stores cos-modulated phase along Z)
@@ -581,11 +617,11 @@ def run(comms):
             # carrying acquisition anywhere else in this repo; see
             # LWG_PGSTE_H.py's changelog for the full reasoning).
             safe_delay(P.PreGrad-2-(P.P90/2.), "pre-grad-2 wait", comms)
-            Gradient3SlewRate(1.0, GradientSlewRate)
-            Gradient3(P.RampTime, P.G1)
+            GradientSlewRateFn(1.0, GradientSlewRate)
+            GradientFn(P.RampTime, P.G1)
             Delay(P.delta)
-            Gradient3(P.RampTime, 0)
-            Gradient3(1,0) # Turn Gradient off explicitly for safety
+            GradientFn(P.RampTime, 0)
+            GradientFn(1,0) # Turn Gradient off explicitly for safety
             Delay(P.GradSettle)
 
             # ACQU
@@ -674,5 +710,10 @@ def run(comms):
 #    numerically (3000 random trials, ~1e-10us max discrepancy) and
 #    against the mock harness (67048064.0us at default Parameters,
 #    matching LWG_PGSTE_H.py's own result at matching defaults exactly).
+# 9. Claude - 18/08/26 - Added a GradAxis selector and Probe/ProbeList
+#    dropdown pairing: mirrors LWG_PGSTE_H.py's identical addition -- see
+#    that file's changelog for the full reasoning. Verified all three
+#    GradAxis values (x/y/z) run cleanly via the mock harness; timing
+#    unchanged (67048064.0us at default Parameters).
 #
 # -----------------------------------------------------------------------------
