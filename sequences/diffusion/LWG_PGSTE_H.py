@@ -1,38 +1,39 @@
 #-------------------------------------------------------------------------------
 # Name:        LWG_PGSTE_H.py
 # Purpose:     Pulsed-Gradient Stimulated Echo (PGSTE / Tanner stimulated
-#              echo) for translational-diffusion measurement: hard-90 - TAU
-#              (gradient) - hard-90 - TM - hard-90 - TAU (gradient) - echo.
-#              X-Pulse Broadband Benchtop NMR Spectrometer (1H/19F channel).
-#              NO IMAGING / NO SLICE SELECTION -- single-shot, non-localised
-#              diffusion measurement (spectroscopic use, or as a bench test
-#              of a b-value/gradient calibration before building a localised
-#              diffusion-imaging sequence on top of it).
+#              echo) for translational-diffusion measurement: hard-90 -
+#              gradient(delta) - hard-90 - DELTA - hard-90 - gradient(delta)
+#              - echo. X-Pulse Broadband Benchtop NMR Spectrometer (1H/19F
+#              channel). NO IMAGING / NO SLICE SELECTION -- single-shot,
+#              non-localised diffusion measurement (spectroscopic use, or as
+#              a bench test of a b-value/gradient calibration before
+#              building a localised diffusion-imaging sequence on top of
+#              it).
 #
 # Author:      Claude, for L. Gordon (DTU)
 #
 # Created:     06/08/2026
 # Copyright:   (c) Oxford Instruments Magnetic Resonance, 2013-
-# Version:     1.4
+# Version:     1.5
 #
 # Design notes:
 #  - Structurally a NEAR-VERBATIM port of the vendor's PGSE_H.py (three-pulse
 #    variant), with the refocusing 180 pulse replaced by a second hard-90
-#    (storage pulse), a mixing delay TM inserted, and a third hard-90
+#    (storage pulse), a mixing delay DELTA inserted, and a third hard-90
 #    (readout/restore pulse) added before the second gradient + acquisition.
 #    Reuses PGSE_H.py's GradientMatrix/Gradient3/ramp-and-settle pattern
 #    verbatim for both gradient pulses, since that pattern is confirmed
 #    working on this instrument (see PGSE_H.py); only the RF/phase/delay
 #    skeleton around it changes.
 #  - WHY A STIMULATED ECHO (vs. the simpler PGSE two-pulse spin echo): during
-#    TM the coherence is stored along +/-Z as longitudinal magnetization, so
-#    it decays with T1 rather than T2 during the mixing period. For samples
-#    with T2 << T1 (common for restricted/slow diffusion, viscous fluids,
-#    or samples with fast transverse relaxation), this lets you probe much
-#    longer diffusion times (Delta) than a spin echo can, at the cost of
+#    DELTA the coherence is stored along +/-Z as longitudinal magnetization,
+#    so it decays with T1 rather than T2 during the mixing period. For
+#    samples with T2 << T1 (common for restricted/slow diffusion, viscous
+#    fluids, or samples with fast transverse relaxation), this lets you
+#    probe much longer diffusion times than a spin echo can, at the cost of
 #    losing half the signal (only the cosine-modulated component survives
 #    the second 90, i.e. an intrinsic factor of ~2 versus PGSE, on top of
-#    T1 decay during TM instead of no decay).
+#    T1 decay during DELTA instead of no decay).
 #  - GRADIENT POLARITY: both diffusion-encoding gradient pulses use the SAME
 #    sign and magnitude (G1), matching PGSE_H.py's convention -- but the
 #    underlying reason is different. In PGSE, the intervening 180 inverts
@@ -47,30 +48,49 @@
 #    stationary spins refocus at the same total phase (0) as in PGSE. This
 #    is the standard Tanner (1970) / Stejskal-Tanner PGSTE convention --
 #    do not flip G1's sign between the two gradient pulses.
-#  - TAU is used SYMMETRICALLY: it is the same total delay (encode-gradient
-#    period) on BOTH sides of TM -- P1-to-P2 and P3-to-acquisition are both
-#    length TAU, with an identical PreGrad/Gradient/GradSettle sub-structure
-#    on each side (see D2a/D2b and D3a/D3b below). This is required for the
-#    two encode/decode gradient pulses to have identical duration (delta) --
-#    an asymmetric implementation would break the basic Stejskal-Tanner
-#    attenuation formula, which assumes matched delta on both sides.
-#    Nominal diffusion time (gradient-centre to gradient-centre):
-#        Delta ~= TM + TAU   (see time_calculation() / run() for the exact
-#        sub-delay algebra; this is an approximate description for anyone
-#        reasoning about b-values, not the literal code path).
+#  - DELTA/delta NAMING (rewritten 17/08/26, at your request, against the
+#    real vendor pulse programme you supplied -- Bruker TopSpin 3.5pl7
+#    lists/pp/diffSte): this file used to have BOTH a "TAU" Parameter
+#    (a large, independently-swept ~20ms "encode/decode window" on each
+#    side of the mixing pulse) and a "TM" Parameter (the mixing delay) --
+#    two confusable, only-loosely-physical quantities. diffSte's own delay
+#    list documents "d5: DELTA remainder", and d5 sits in EXACTLY the P2-
+#    to-P3 mixing position this file used to call TM -- i.e. Bruker's own
+#    Delta (the diffusion time entering the Stejskal-Tanner formula) IS the
+#    P2-to-P3 mixing period, not "TM+TAU". diffSte's flanking d9/d10 ("tau
+#    remainder") are short, near-fixed gradient-recovery/trigger-shift
+#    delays, not a second independently-swept diffusion-time knob -- the
+#    direct analogue already present in this file is PreGrad/GradSettle
+#    (unchanged by this rewrite). So: TM -> DELTA (direct rename, same
+#    physical position and meaning), GradientOnTime -> delta (the gradient
+#    pulse's plateau duration, Stejskal-Tanner's small-delta), and the old
+#    independent "Tau" Parameter is REMOVED entirely -- the encode/decode
+#    windows are now just PreGrad -> gradient(delta) -> GradSettle,
+#    flowing straight into the next pulse, with no separate user-set
+#    "rest of window" delay (see run() below). This is now driven by a
+#    SINGLE diffusion-time knob (DELTA), matching how diffSte's own
+#    delay list is actually used in practice (D20/Delta is what an
+#    operator sets to change the diffusion time; the short d9/d10/d5-
+#    remainder terms are computed, not independently dialled in).
 #    Approximate b-value (Stejskal &amp; Tanner 1965): b = (gamma*G1_abs*delta)^2
-#    * (Delta - delta/3), where delta = GradientOnTime + 2*RampTime (the
-#    effective encoding gradient duration) and G1_abs is your gradient in
-#    real units (T/m) -- G1 here is only a DIMENSIONLESS -1.0..1.0 DAC
-#    fraction; convert using your own gradient-coil calibration (mT/m per
-#    unit G1) before using this formula quantitatively.
-#  - NO SPOILER GRADIENT during TM. The Z-storage pathway (what you want)
-#    survives TM regardless, but unwanted transverse coherences that leak
-#    through P2 (e.g. from imperfect 90 calibration) do NOT get spoiled
-#    here -- they are instead suppressed only by the phase cycle below. If
-#    you see artefacts that track RFA0 calibration error rather than TM,
-#    consider adding a homospoil/spoiler gradient pulse immediately after
-#    P2 (before TM) in a future revision.
+#    * (DELTA - delta/3), where delta = P.delta + 2*RampTime (the effective
+#    encoding gradient duration, ramps included) and G1_abs is your
+#    gradient in real units (T/m) -- G1 here is only a DIMENSIONLESS
+#    -1.0..1.0 DAC fraction; convert using your own gradient-coil
+#    calibration (mT/m per unit G1) before using this formula
+#    quantitatively.
+#  - NO SPOILER GRADIENT during DELTA. diffSte itself DOES fire a spoiler
+#    gradient (p19:gp5, sine shape) partway through its own mixing period --
+#    this file still does not, a known, deliberate gap flagged here (and in
+#    the original design notes before this rewrite) rather than silently
+#    carried over from the vendor sequence. The Z-storage pathway (what you
+#    want) survives DELTA regardless, but unwanted transverse coherences
+#    that leak through P2 (e.g. from imperfect 90 calibration) do NOT get
+#    spoiled here -- they are instead suppressed only by the phase cycle
+#    below. If you see artefacts that track RFA0 calibration error rather
+#    than DELTA, consider adding a homospoil/spoiler gradient pulse
+#    immediately after P2 (before DELTA) in a future revision, matching
+#    diffSte's own structure.
 #  - PHASE CYCLE: taken DIRECTLY from Bruker's vendor-supplied "diffSte"
 #    pulse programme (TopSpin 3.5pl7, lists/pp/diffSte -- a standard,
 #    field-tested PGSTE phase cycle), converting Bruker's quarter-cycle
@@ -203,8 +223,8 @@ def safe_delay(value, label, comms):
     silent/confusing failure if a computed delay would be negative."""
     if value < 0:
         msg = ("FATAL TIMING ERROR computing '{0}': delay would be {1:.2f} us "
-               "(negative). Increase TAU (or TM), or decrease P90/PreGrad/"
-               "GradientOnTime/RampTime/GradSettle, then retry.").format(label, value)
+               "(negative). Increase DELTA, or decrease P90/PreGrad/"
+               "delta/RampTime/GradSettle, then retry.").format(label, value)
         comms.log(msg)
         raise ValueError(msg)
     Delay(value)
@@ -250,7 +270,7 @@ def estimate_duty_cycles(P, rf_on_time, grad_on_time, comms):
     if grad_duty > P.MaxGradDuty:
         comms.log("WARNING: estimated gradient duty cycle {0:.2%} exceeds "
                   "MaxGradDuty ({1:.2%}). Consider a longer RD or shorter "
-                  "GradientOnTime, or confirm with Oxford Instruments that "
+                  "delta (gradient duration), or confirm with Oxford Instruments that "
                   "this is within the gradient amplifier's rated duty cycle "
                   "before running unattended.".format(grad_duty, P.MaxGradDuty))
 
@@ -299,44 +319,53 @@ def time_calculation(P):
     FilterFile = ChooseFilter(P.Filter)
     ReceiverFilter = Filter(FilterFile)
     DW = ReceiverFilter.dwell
+    ReceiverTime = P.ReceiverPoints*DW
+    GradWidth = 2*P.RampTime + P.delta
 
-    # Matches run()'s actual per-scan timing exactly (this file already
-    # included RD -- unlike most other pp files in this repo, see
-    # changelog for the wider audit -- but the previous D3/PreGrad/
-    # GradWidth bookkeeping double-counted the two TAU periods' explicit
-    # gradient delays against D3's own "rest of TAU" subtraction, a real
-    # ~100-150us/scan error, small next to RD but non-zero). Purely
-    # sequential (no 'with parallel:' here), so this is just every
-    # Delay()/duration argument in the per-scan block summed exactly, then
-    # algebraically simplified: the three P90 pulses and TXEnableTime
-    # delays partially cancel against the TM/D3a/D3b subtractions (each of
-    # which nets out a P90/2 or TXEnableTime term), leaving TM - P90 +
-    # 2*TXEnableTime net; the two TAU periods contribute 2*Tau net (their
-    # own PreGrad/GradWidth/GradSettle terms cancel exactly against D3a/
-    # D3b's subtraction of the same terms); 208us is the sum of every
-    # small fixed-duration instruction (Channel1SetBasePhase/
-    # Transmit1Blanking/Gradient3SlewRate/Receiver1FilterFlush/etc.).
-    t_scanTime = (P.RecycleDelay + 2*P.Tau + P.TM - P.P90 + 2*P.TXEnableTime
-                  + ReceiverFilter.group_delay + P.ReceiverPoints*DW + 208.0)
+    # Exact term-by-term derivation of run()'s actual per-scan body
+    # (rewritten 17/08/26 alongside the TAU/TM -> delta/DELTA rename --
+    # see design notes). Purely sequential (no 'with parallel:'), so this
+    # is every Delay()/duration-argument instruction summed exactly, then
+    # simplified algebraically: TXEnableTime and P90 partially cancel
+    # against the DELTA-mixing-wait subtraction; the pre-grad/gradient/
+    # settle sub-structure appears identically (2x) on the encode and
+    # decode sides, giving 2*GradWidth + 2*PreGrad + 2*GradSettle. NO
+    # group_delay term -- unlike an earlier version of this file, the
+    # decode gradient now flows straight into ACQU with no standalone
+    # receiver-alignment wait, matching the imaging family's own
+    # gradient-echo convention (group_delay compensation is only used
+    # elsewhere in this repo for plain, non-gradient spectroscopy echoes
+    # -- see LWG_CPMG-Image-Echo_H.py's design notes -- and has no
+    # precedent for a gradient-carrying acquisition; the earlier PGSTE
+    # formula's use of it here had no such precedent either and could go
+    # negative for plausible real dead_time/group_delay combinations).
+    # 224us is the sum of every remaining small fixed-duration
+    # instruction (Channel1SetBasePhase/Transmit1Blanking/
+    # Gradient3SlewRate/Receiver1FilterFlush/etc.). Verified numerically
+    # against an independent term-by-term re-implementation (3000 random
+    # trials, ~1e-10us max discrepancy).
+    t_scanTime = (P.RecycleDelay + P.DELTA + 2*P.PreGrad + 2*GradWidth
+                  + 2*P.GradSettle + 2*P.TXEnableTime + P.P90
+                  + ReceiverFilter.dead_time + ReceiverTime + 224.0)
     t_acqTime = t_scanTime * (P.NumScans + P.DS)
     return t_acqTime
 
 def sequence_description():
 
     seq_desc = ("Pulsed-Gradient Stimulated Echo (PGSTE / Tanner stimulated "
-                "echo) on the {H/F} channel: hard-90 - TAU(gradient) - "
-                "hard-90 - TM - hard-90 - TAU(gradient) - echo. Used for "
-                "measurement of diffusion constants where T2 << T1 makes a "
-                "spin-echo PGSE sequence (PGSE_H.py) impractical for the "
-                "diffusion time (Delta) you need, at the cost of half the "
-                "signal and T1 (not T2) decay during the TM mixing delay. "
-                "Non-localised (no imaging/slice-selection).")
+                "echo) on the {H/F} channel: hard-90 - gradient(delta) - "
+                "hard-90 - DELTA - hard-90 - gradient(delta) - echo. Used "
+                "for measurement of diffusion constants where T2 << T1 "
+                "makes a spin-echo PGSE sequence (PGSE_H.py) impractical "
+                "for the diffusion time (DELTA) you need, at the cost of "
+                "half the signal and T1 (not T2) decay during the DELTA "
+                "mixing delay. Non-localised (no imaging/slice-selection).")
 
     return seq_desc
 
 def sequence_basic():
 
-    basic = "NS,RD,NP,Filter,TAU,TM,G1"
+    basic = "NS,RD,NP,Filter,DELTA,delta,G1"
 
     return basic
 
@@ -376,7 +405,7 @@ class Parameters:
     # Gradients -- same G1 amplitude used for BOTH the encode and decode
     # gradient pulses (see design notes: DO NOT flip sign between them).
     G1 = Parameter("G1", 1.0, ParameterTypes.Double, "Diffusion Gradient Strength [-1.0&#8230;1.0]")
-    GradientOnTime = Parameter("D71", 4000.0, ParameterTypes.Double, "Gradient Duration (&#948;, plateau only) [&#956;s]")
+    delta = Parameter("delta", 4000.0, ParameterTypes.Double, "Gradient Duration [&#956;s] -- Stejskal-Tanner &#948; (plateau only, ramps separate)")
     RampTime = Parameter("D70", 500.0, ParameterTypes.Double, "Gradient Ramp Time [&#956;s]")
     GradSettle = Parameter("D73", 100.0, ParameterTypes.Double, "Gradient Settling Duration [&#956;s]")
     PreGrad = Parameter("D75", 1000.0, ParameterTypes.Double, "Pre-Gradient Time (delay from pulse to gradient start) [&#956;s]")
@@ -387,12 +416,12 @@ class Parameters:
     # timing/hardware calls.
     Probe = Parameter("Probe", "HFX", ParameterTypes.String, "Probe fitted to magnet ['HFX'=calibrated, 'LOWGAMMA'=NOT YET CALIBRATED]")
 
-    # Sequence-specific timing
-    Tau = Parameter("TAU", 20000.0, ParameterTypes.Double,
-                     "TAU [&#956;s], P1-to-P2 and P3-to-acq (symmetric) -- "
-                     "must exceed PreGrad+2*RampTime+GradientOnTime+GradSettle+P90")
-    TM = Parameter("TM", 50000.0, ParameterTypes.Double,
-                    "Mixing Time [&#956;s], P2-to-P3 delay -- Delta &#8776; TM + TAU")
+    # Sequence-specific timing -- DELTA is the ONLY diffusion-time knob (see
+    # design notes: this is Bruker diffSte's own "d5: DELTA remainder"
+    # position, P2-to-P3, not TM+TAU from an earlier version of this file).
+    DELTA = Parameter("DELTA", 50000.0, ParameterTypes.Double,
+                       "Diffusion Time &#916; [&#956;s], P2-to-P3 (mixing) delay -- "
+                       "*** ARRAY THIS to vary the diffusion time *** must exceed TXEnable+P90")
 
     # Duty-cycle guard rails
     MaxRFDuty = Parameter("MaxRFDuty", 0.05, ParameterTypes.Double, "Max RF Duty Cycle Warning Threshold [0.0&#8230;1.0]")
@@ -437,15 +466,8 @@ def run(comms):
     points = P.ReceiverPoints
     times = np.arange(0, points*ReceiverFilter.dwell, ReceiverFilter.dwell) / 1.0e6
 
-    GradWidth = 2*P.RampTime + P.GradientOnTime
+    GradWidth = 2*P.RampTime + P.delta
     GradientSlewRate = abs(P.G1/P.RampTime)
-
-    # "Rest of TAU" after the gradient/settle and pulse tails, on EACH side
-    # (identical algebra both sides, by design -- see design notes on why
-    # TAU must be symmetric). Same -2/-7 fudge-constant convention as
-    # PGSE_H.py's D3 (matches that file's proven-working overhead).
-    D3a = P.Tau - P.PreGrad - GradWidth - P.GradSettle - (P.P90/2.) - (P.P90/2.) - 7
-    D3b = D3a
 
     def jcamp_meta():
         global BLP
@@ -515,15 +537,16 @@ def run(comms):
             Transmit1(P.P90)
             Transmit1BlankingOff(1)
 
-            # First TAU (encode side): PreGrad, gradient, settle, rest
+            # Encode gradient: PreGrad, gradient(delta), settle -- flows
+            # straight into P2, no separate "rest of window" delay (see
+            # design notes: the old independent TAU Parameter is gone).
             safe_delay(P.PreGrad-2-(P.P90/2.), "pre-grad-1 wait", comms)
             Gradient3SlewRate(1.0, GradientSlewRate)
             Gradient3(P.RampTime, P.G1)
-            Delay(P.GradientOnTime)
+            Delay(P.delta)
             Gradient3(P.RampTime, 0)
             Gradient3(1,0) # Turn Gradient off explicitly for safety
             Delay(P.GradSettle)
-            safe_delay(D3a, "first-TAU rest wait", comms)
 
             # P2 -- storage 90 (stores cos-modulated phase along Z)
             Channel1SetBasePhase(3, ph["PH2"])
@@ -532,9 +555,11 @@ def run(comms):
             Transmit1(P.P90)
             Transmit1BlankingOff(1)
 
-            # TM -- mixing delay, T1 (not T2) relaxation while stored on Z.
-            # No spoiler gradient here -- see design notes.
-            safe_delay(P.TM - P.TXEnableTime - (P.P90/2.) - (P.P90/2.), "TM mixing wait", comms)
+            # DELTA -- mixing delay = the diffusion time (P2-to-P3, matching
+            # Bruker diffSte's own "d5: DELTA remainder" position -- see
+            # design notes). T1 (not T2) relaxation while stored on Z. No
+            # spoiler gradient here -- see design notes.
+            safe_delay(P.DELTA - P.TXEnableTime - (P.P90/2.) - (P.P90/2.), "DELTA mixing wait", comms)
 
             # P3 -- restore 90 (returns stored Z-magnetization to transverse)
             Channel1SetBasePhase(3, ph["PH3"])
@@ -543,17 +568,20 @@ def run(comms):
             Transmit1(P.P90)
             Transmit1BlankingOff(1)
 
-            # Second TAU (decode side): PreGrad, gradient (SAME sign as
-            # above -- see design notes), settle, rest (minus receiver
-            # dead-time/group-delay, paid back explicitly at ACQU).
+            # Decode gradient: PreGrad, gradient (SAME sign as above -- see
+            # design notes), settle -- flows straight into ACQU, matching
+            # the imaging family's own gradient-echo convention (no
+            # standalone group_delay compensation term for a gradient-
+            # carrying acquisition anywhere else in this repo; that term
+            # is only used for plain, non-gradient spectroscopy echoes --
+            # see LWG_CPMG-Image-Echo_H.py's design notes).
             safe_delay(P.PreGrad-2-(P.P90/2.), "pre-grad-2 wait", comms)
             Gradient3SlewRate(1.0, GradientSlewRate)
             Gradient3(P.RampTime, P.G1)
-            Delay(P.GradientOnTime)
+            Delay(P.delta)
             Gradient3(P.RampTime, 0)
             Gradient3(1,0) # Turn Gradient off explicitly for safety
             Delay(P.GradSettle)
-            safe_delay(D3b-ReceiverFilter.dead_time-2+ReceiverFilter.group_delay, "second-TAU rest wait", comms)
 
             # ACQU
             Channel1SetBasePhase(1,0)
@@ -649,5 +677,35 @@ def run(comms):
 #    PhasesManager(P)/Phases.Incd()/ph["PH1"] logic was already correct
 #    and unchanged. Verified via the mock harness (previously failed with
 #    this exact KeyError; now completes the full scan loop).
+# 8. Claude - 17/08/26 - RENAMED TAU/TM to delta/DELTA, at your request,
+#    against the real Bruker diffSte pulse programme you supplied (Topspin
+#    3.5pl7 lists/pp/diffSte) -- see design notes for the full reasoning.
+#    diffSte's own delay list documents "d5: DELTA remainder", sitting in
+#    the P2-to-P3 mixing position this file called TM -- confirming
+#    DELTA IS the mixing delay, not TM+TAU as an earlier version of this
+#    file's design notes approximated. GradientOnTime -> delta (short
+#    code "delta", the Stejskal-Tanner small-delta). TM -> DELTA (short
+#    code "DELTA", same position and meaning, direct rename). The
+#    independent Tau Parameter (a large, separately-swept "encode/decode
+#    window" with no real analogue in diffSte's own structure) was REMOVED
+#    entirely -- the encode/decode sides are now just PreGrad ->
+#    gradient(delta) -> GradSettle, flowing straight into the next pulse,
+#    with DELTA as the only diffusion-time knob. Also REMOVED the old
+#    D3b "second-TAU rest wait" formula's +group_delay term when
+#    rebuilding the decode-side timing -- audited every other file in
+#    this repo and found group_delay compensation is ONLY ever used for
+#    plain, non-gradient spectroscopy echoes (e.g.
+#    LWG_CPMG-Image-Echo_H.py's final-echo formula), never for a
+#    gradient-carrying acquisition; the old formula's use of it here had
+#    no precedent and could go negative for plausible real dead_time/
+#    group_delay combinations (confirmed: it did, under the mock
+#    harness's own placeholder Filter values). time_calculation()
+#    re-derived exactly term-by-term for the new structure and verified
+#    numerically against an independent term-by-term re-implementation
+#    (3000 random trials, ~1e-10us max discrepancy) and against the mock
+#    harness (67048064.0us at default Parameters, hand-checked exactly).
+#    NOTE: diffSte's own mixing period ALSO fires a spoiler gradient
+#    (p19:gp5) that this file still does not -- flagged as a separate,
+#    deliberate gap in the design notes (not addressed by this rename).
 #
 # -----------------------------------------------------------------------------

@@ -3,8 +3,8 @@
 # Purpose:     Pulsed-Gradient Stimulated Echo (PGSTE / Tanner stimulated
 #              echo) for translational-diffusion measurement, with WET
 #              (Water suppression Enhanced through T1 effects) solvent
-#              suppression prepended to every scan: hard-90 - TAU(gradient)
-#              - hard-90 - TM - hard-90 - TAU(gradient) - echo. X-Pulse
+#              suppression prepended to every scan: hard-90 - gradient(delta)
+#              - hard-90 - DELTA - hard-90 - gradient(delta) - echo. X-Pulse
 #              Broadband Benchtop NMR Spectrometer (1H/19F channel).
 #              NO IMAGING / NO SLICE SELECTION -- single-shot, non-localised
 #              diffusion measurement of a solute in a strongly-dominant
@@ -16,14 +16,15 @@
 #
 # Created:     10/08/2026
 # Copyright:   (c) Oxford Instruments Magnetic Resonance, 2013-
-# Version:     1.2
+# Version:     1.3
 # status:      draft
 #
 # Design notes:
 #  - THIS FILE vs LWG_PGSTE_H.py: identical PGSTE diffusion timing/gradient/
 #    phase-cycle skeleton (see that file's own design notes for the full
-#    Tanner-PGSTE derivation, gradient-polarity reasoning, and b-value
-#    formula -- not repeated here). The ONLY addition is the WET module
+#    Tanner-PGSTE derivation, gradient-polarity reasoning, delta/DELTA
+#    naming, and b-value formula -- not repeated here). The ONLY addition
+#    is the WET module
 #    (wet_suppression() below), called once per scan, immediately after the
 #    RD wait and before the excitation pulse (P1). Set WetOn=0 to recover
 #    LWG_PGSTE_H.py's exact behaviour (zero added RF/gradient/time when
@@ -209,8 +210,8 @@ def safe_delay(value, label, comms):
     silent/confusing failure if a computed delay would be negative."""
     if value < 0:
         msg = ("FATAL TIMING ERROR computing '{0}': delay would be {1:.2f} us "
-               "(negative). Increase TAU (or TM), or decrease P90/PreGrad/"
-               "GradientOnTime/RampTime/GradSettle, then retry.").format(label, value)
+               "(negative). Increase DELTA, or decrease P90/PreGrad/"
+               "delta/RampTime/GradSettle, then retry.").format(label, value)
         comms.log(msg)
         raise ValueError(msg)
     Delay(value)
@@ -256,7 +257,7 @@ def estimate_duty_cycles(P, rf_on_time, grad_on_time, comms):
     if grad_duty > P.MaxGradDuty:
         comms.log("WARNING: estimated gradient duty cycle {0:.2%} exceeds "
                   "MaxGradDuty ({1:.2%}). Consider a longer RD or shorter "
-                  "GradientOnTime/WetGradTime, or confirm with Oxford "
+                  "delta (gradient duration)/WetGradTime, or confirm with Oxford "
                   "Instruments that this is within the gradient amplifier's "
                   "rated duty cycle before running unattended.".format(grad_duty, P.MaxGradDuty))
 
@@ -434,13 +435,16 @@ def time_calculation(P):
     FilterFile = ChooseFilter(P.Filter)
     ReceiverFilter = Filter(FilterFile)
     DW = ReceiverFilter.dwell
+    ReceiverTime = P.ReceiverPoints*DW
+    GradWidth = 2*P.RampTime + P.delta
 
     # Matches run()'s actual per-scan timing exactly -- see LWG_PGSTE_H.py's
-    # changelog for the base-formula derivation (RD + 2*Tau + TM - P90 +
-    # 2*TXEnableTime + group_delay + points*DW + 208), unchanged here. The
-    # WET block adds its own per-scan time on TOP of that (it runs once,
-    # after RD, before P1 -- see design notes): 4x(shaped pulse + spoiler
-    # gradient + inter-pulse wait), i.e.
+    # changelog for the base-formula derivation (RD + DELTA + 2*PreGrad +
+    # 2*GradWidth + 2*GradSettle + 2*TXEnableTime + P90 + dead_time +
+    # ReceiverTime + 224), unchanged here. The WET block adds its own
+    # per-scan time on TOP of that (it runs once, after RD, before P1 --
+    # see design notes): 4x(shaped pulse + spoiler gradient + inter-pulse
+    # wait), i.e.
     # 4*(WetPulseWidth+TXEnableTime+SHAPED_PULSE_FIXED_OVERHEAD +
     #    2*WetRampTime+WetGradTime+WetGradSettle+WetInterDelay+2), plus the
     # two 10000us LP/HP port-switch relay-settle delays. Zero when
@@ -453,8 +457,9 @@ def time_calculation(P):
     else:
         wet_time = 0.0
 
-    t_scanTime = (P.RecycleDelay + 2*P.Tau + P.TM - P.P90 + 2*P.TXEnableTime
-                  + ReceiverFilter.group_delay + P.ReceiverPoints*DW + 208.0
+    t_scanTime = (P.RecycleDelay + P.DELTA + 2*P.PreGrad + 2*GradWidth
+                  + 2*P.GradSettle + 2*P.TXEnableTime + P.P90
+                  + ReceiverFilter.dead_time + ReceiverTime + 224.0
                   + wet_time)
     t_acqTime = t_scanTime * (P.NumScans + P.DS)
     return t_acqTime
@@ -465,19 +470,19 @@ def sequence_description():
                 "echo) on the {H/F} channel, with a WET water-suppression "
                 "module (4 selective pulses + decreasing spoiler gradients, "
                 "targeting WetOffsetPPM) prepended to every scan: [WET] - "
-                "hard-90 - TAU(gradient) - hard-90 - TM - hard-90 - "
-                "TAU(gradient) - echo. Used for measurement of diffusion "
+                "hard-90 - gradient(delta) - hard-90 - DELTA - hard-90 - "
+                "gradient(delta) - echo. Used for measurement of diffusion "
                 "constants where T2 &lt;&lt; T1 makes a spin-echo PGSE sequence "
-                "impractical for the diffusion time (Delta) you need, at "
+                "impractical for the diffusion time (DELTA) you need, at "
                 "the cost of half the signal and T1 (not T2) decay during "
-                "the TM mixing delay. Non-localised (no imaging/slice-"
+                "the DELTA mixing delay. Non-localised (no imaging/slice-"
                 "selection). Set WetOn=0 to disable suppression.")
 
     return seq_desc
 
 def sequence_basic():
 
-    basic = "NS,RD,NP,Filter,TAU,TM,G1,WetOn,WetOffsetPPM"
+    basic = "NS,RD,NP,Filter,DELTA,delta,G1,WetOn,WetOffsetPPM"
 
     return basic
 
@@ -517,7 +522,7 @@ class Parameters:
     # Gradients -- same G1 amplitude used for BOTH the encode and decode
     # gradient pulses (see design notes: DO NOT flip sign between them).
     G1 = Parameter("G1", 1.0, ParameterTypes.Double, "Diffusion Gradient Strength [-1.0&#8230;1.0]")
-    GradientOnTime = Parameter("D71", 4000.0, ParameterTypes.Double, "Gradient Duration (&#948;, plateau only) [&#956;s]")
+    delta = Parameter("delta", 4000.0, ParameterTypes.Double, "Gradient Duration [&#956;s] -- Stejskal-Tanner &#948; (plateau only, ramps separate)")
     RampTime = Parameter("D70", 500.0, ParameterTypes.Double, "Gradient Ramp Time [&#956;s]")
     GradSettle = Parameter("D73", 100.0, ParameterTypes.Double, "Gradient Settling Duration [&#956;s]")
     PreGrad = Parameter("D75", 1000.0, ParameterTypes.Double, "Pre-Gradient Time (delay from pulse to gradient start) [&#956;s]")
@@ -528,12 +533,13 @@ class Parameters:
     # timing/hardware calls.
     Probe = Parameter("Probe", "HFX", ParameterTypes.String, "Probe fitted to magnet ['HFX'=calibrated, 'LOWGAMMA'=NOT YET CALIBRATED]")
 
-    # Sequence-specific timing
-    Tau = Parameter("TAU", 20000.0, ParameterTypes.Double,
-                     "TAU [&#956;s], P1-to-P2 and P3-to-acq (symmetric) -- "
-                     "must exceed PreGrad+2*RampTime+GradientOnTime+GradSettle+P90")
-    TM = Parameter("TM", 50000.0, ParameterTypes.Double,
-                    "Mixing Time [&#956;s], P2-to-P3 delay -- Delta &#8776; TM + TAU")
+    # Sequence-specific timing -- DELTA is the ONLY diffusion-time knob (see
+    # LWG_PGSTE_H.py's design notes: this is Bruker diffSte's own "d5:
+    # DELTA remainder" position, P2-to-P3, not TM+TAU from an earlier
+    # version of this file).
+    DELTA = Parameter("DELTA", 50000.0, ParameterTypes.Double,
+                       "Diffusion Time &#916; [&#956;s], P2-to-P3 (mixing) delay -- "
+                       "*** ARRAY THIS to vary the diffusion time *** must exceed TXEnable+P90")
 
     # ---- WET (Water suppression Enhanced through T1 effects) -------------
     # Standard 4-pulse WET module (Ogg, Kingsley &amp; Freeman 1994 -- see
@@ -620,14 +626,8 @@ def run(comms):
     points = P.ReceiverPoints
     times = np.arange(0, points*ReceiverFilter.dwell, ReceiverFilter.dwell) / 1.0e6
 
-    GradWidth = 2*P.RampTime + P.GradientOnTime
+    GradWidth = 2*P.RampTime + P.delta
     GradientSlewRate = abs(P.G1/P.RampTime)
-
-    # "Rest of TAU" after the gradient/settle and pulse tails, on EACH side
-    # (identical algebra both sides, by design -- see LWG_PGSTE_H.py's
-    # design notes on why TAU must be symmetric).
-    D3a = P.Tau - P.PreGrad - GradWidth - P.GradSettle - (P.P90/2.) - (P.P90/2.) - 7
-    D3b = D3a
 
     def jcamp_meta():
         global BLP
@@ -719,15 +719,17 @@ def run(comms):
             Transmit1(P.P90)
             Transmit1BlankingOff(1)
 
-            # First TAU (encode side): PreGrad, gradient, settle, rest
+            # Encode gradient: PreGrad, gradient(delta), settle -- flows
+            # straight into P2, no separate "rest of window" delay (see
+            # LWG_PGSTE_H.py's design notes: the old independent TAU
+            # Parameter is gone).
             safe_delay(P.PreGrad-2-(P.P90/2.), "pre-grad-1 wait", comms)
             Gradient3SlewRate(1.0, GradientSlewRate)
             Gradient3(P.RampTime, P.G1)
-            Delay(P.GradientOnTime)
+            Delay(P.delta)
             Gradient3(P.RampTime, 0)
             Gradient3(1,0) # Turn Gradient off explicitly for safety
             Delay(P.GradSettle)
-            safe_delay(D3a, "first-TAU rest wait", comms)
 
             # P2 -- storage 90 (stores cos-modulated phase along Z)
             Channel1SetBasePhase(3, ph["PH2"])
@@ -736,9 +738,11 @@ def run(comms):
             Transmit1(P.P90)
             Transmit1BlankingOff(1)
 
-            # TM -- mixing delay, T1 (not T2) relaxation while stored on Z.
-            # No spoiler gradient here -- see LWG_PGSTE_H.py design notes.
-            safe_delay(P.TM - P.TXEnableTime - (P.P90/2.) - (P.P90/2.), "TM mixing wait", comms)
+            # DELTA -- mixing delay = the diffusion time (P2-to-P3, matching
+            # Bruker diffSte's own "d5: DELTA remainder" position -- see
+            # LWG_PGSTE_H.py's design notes). T1 (not T2) relaxation while
+            # stored on Z. No spoiler gradient here -- see design notes.
+            safe_delay(P.DELTA - P.TXEnableTime - (P.P90/2.) - (P.P90/2.), "DELTA mixing wait", comms)
 
             # P3 -- restore 90 (returns stored Z-magnetization to transverse)
             Channel1SetBasePhase(3, ph["PH3"])
@@ -747,17 +751,19 @@ def run(comms):
             Transmit1(P.P90)
             Transmit1BlankingOff(1)
 
-            # Second TAU (decode side): PreGrad, gradient (SAME sign as
-            # above -- see design notes), settle, rest (minus receiver
-            # dead-time/group-delay, paid back explicitly at ACQU).
+            # Decode gradient: PreGrad, gradient (SAME sign as above -- see
+            # design notes), settle -- flows straight into ACQU, matching
+            # the imaging family's own gradient-echo convention (no
+            # standalone group_delay compensation term for a gradient-
+            # carrying acquisition anywhere else in this repo; see
+            # LWG_PGSTE_H.py's changelog for the full reasoning).
             safe_delay(P.PreGrad-2-(P.P90/2.), "pre-grad-2 wait", comms)
             Gradient3SlewRate(1.0, GradientSlewRate)
             Gradient3(P.RampTime, P.G1)
-            Delay(P.GradientOnTime)
+            Delay(P.delta)
             Gradient3(P.RampTime, 0)
             Gradient3(1,0) # Turn Gradient off explicitly for safety
             Delay(P.GradSettle)
-            safe_delay(D3b-ReceiverFilter.dead_time-2+ReceiverFilter.group_delay, "second-TAU rest wait", comms)
 
             # ACQU
             Channel1SetBasePhase(1,0)
@@ -830,5 +836,21 @@ def run(comms):
 #    "phase-cycling naming symmetry" rule for the corrected, permanent
 #    guidance). Verified via the mock harness (no exception, full 32-scan
 #    loop completes).
+# 4. Claude - 17/08/26 - RENAMED TAU/TM to delta/DELTA: mirrors
+#    LWG_PGSTE_H.py's identical rewrite, against the real Bruker diffSte
+#    pulse programme you supplied (TopSpin 3.5pl7 lists/pp/diffSte) -- see
+#    that file's changelog/design notes for the full reasoning
+#    (diffSte's own delay list documents "d5: DELTA remainder" sitting in
+#    the P2-to-P3 mixing position this file called TM). GradientOnTime ->
+#    delta, TM -> DELTA, independent Tau Parameter removed entirely -- the
+#    WET module itself (wet_suppression(), prepended before P1) is
+#    untouched, since it never referenced Tau/TM/GradientOnTime.
+#    time_calculation() re-derived to match LWG_PGSTE_H.py's new base
+#    formula plus the unchanged WET-time addition, verified via the mock
+#    harness (70918272.0us at default Parameters; the WET-time delta vs.
+#    LWG_PGSTE_H.py's own 67048064.0us at matching defaults, 3870208.0us,
+#    matches an independent hand calculation of 4x(WetPulseWidth+
+#    TXEnableTime+SHAPED_PULSE_FIXED_OVERHEAD+2*WetRampTime+WetGradTime+
+#    WetGradSettle+WetInterDelay+2)+20000, times NumScans+DS, exactly).
 #
 # -----------------------------------------------------------------------------
