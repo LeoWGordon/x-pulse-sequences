@@ -11,7 +11,7 @@
 # Created:     05/08/2020
 # Revised:     06/08/2026
 # Copyright:   (c) Oxford Instruments Magnetic Resonance, 2013-
-# Version:     3.3
+# Version:     3.4
 #
 # Basis:       v3.0 is a NEAR-VERBATIM copy of LWG_diffprof_2_H.py, which is
 #              confirmed to compile and run on this X-Pulse (unlike the
@@ -185,7 +185,7 @@ def sequence_description():
 
 def sequence_basic():
 
-    basic = "NS,RD,NP,Filter,TAU,D70,D73,D71,D75,G1,GradAxis"
+    basic = "NS,RD,NP,Filter,TAU,D70,D73,D71,D75,G1,GradAxis,Probe,Dead1"
 
     return basic
 
@@ -740,5 +740,11 @@ def run(comms):
 #    hyphens, uppercase) already maps that to the unchanged MAXGRAD_TABLE
 #    key "LOWGAMMA", so no table changes were needed. Purely a Parameter-
 #    panel change -- no effect on timing/hardware calls.
+#
+# 15. Claude - 18/08/26 - Added Probe and Dead1 to sequence_basic() at
+#    your request, so both already-existing Parameters show up in
+#    SpinFlow's quick "basic parameters" panel rather than requiring the
+#    full parameter list to find/set them. No change to the Parameters
+#    themselves or to timing/hardware calls.
 #
 # -----------------------------------------------------------------------------

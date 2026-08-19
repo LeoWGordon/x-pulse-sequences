@@ -11,7 +11,7 @@
 # Created:     04/08/2026
 # Revised:     06/08/2026
 # Copyright:   (c) Oxford Instruments Magnetic Resonance, 2013-
-# Version:     1.3
+# Version:     1.4
 #
 # Design notes -- READ THIS, this sequence is structurally different from
 # LWG_1D-Image-Echo_H.py, not just a parameter change:
@@ -187,7 +187,7 @@ def sequence_description():
 
 def sequence_basic():
 
-    basic = "NS,RD,NP,Filter,D70,D73,D71,D75,G1,GradAxis,P90"
+    basic = "NS,RD,NP,Filter,D70,D73,D71,D75,G1,GradAxis,P90,Probe,Dead1"
 
     return basic
 
@@ -641,5 +641,11 @@ def run(comms):
 #    hyphens, uppercase) already maps that to the unchanged MAXGRAD_TABLE
 #    key "LOWGAMMA", so no table changes were needed. Purely a Parameter-
 #    panel change -- no effect on timing/hardware calls.
+#
+# 6. Claude - 18/08/26 - Added Probe and Dead1 to sequence_basic() at
+#    your request, so both already-existing Parameters show up in
+#    SpinFlow's quick "basic parameters" panel rather than requiring the
+#    full parameter list to find/set them. No change to the Parameters
+#    themselves or to timing/hardware calls.
 #
 # -----------------------------------------------------------------------------

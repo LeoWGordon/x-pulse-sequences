@@ -15,7 +15,7 @@
 # Created:     06/08/2026
 # Revised:     07/08/2026
 # Copyright:   (c) Oxford Instruments Magnetic Resonance, 2013-
-# Version:     1.2
+# Version:     1.3
 #
 # X-CHANNEL CALIBRATION -- IMPORTANT: this is a mechanical H->X port (all
 # Channel1/Transmit1/Receiver1/TX0 -> Channel2/Transmit2/Receiver2/TX1). SF
@@ -232,7 +232,7 @@ def sequence_description():
 
 def sequence_basic():
 
-    basic = "NS,RD,NP,Filter,SlicePPM,P90sh,RFAsh0,G1,GradAxis"
+    basic = "NS,RD,NP,Filter,SlicePPM,P90sh,RFAsh0,G1,GradAxis,Probe,Dead1"
 
     return basic
 
@@ -636,6 +636,41 @@ def estimate_duty_cycles(P, rf_on_time, grad_on_time, comms):
                   .format(grad_duty, P.Axis, P.MaxGradDuty))
 
 
+# Per-axis max gradient strength (G/cm) for probes that can be fitted to
+# this magnet. There is no way to detect which probe is mounted from
+# software, so this is a MANUAL selector (Probe Parameter below) -- the
+# operator must set it to match what is actually on the magnet. KEEP THIS
+# TABLE IN SYNC with leonmr/xpulse_imaging.py's own GRADIENT_CALIBRATION
+# dict (duplicated here rather than imported, since pulse programmes can't
+# import external Python modules).
+MAXGRAD_TABLE = {
+    "HFX": {"x": 11.879, "y": 11.978, "z": 57.915},   # G/cm, measured/averaged 06/08/2026
+    "LOWGAMMA": {"x": None, "y": None, "z": None},     # NOT YET CALIBRATED
+}
+
+def report_probe_gradient(P, comms, axis=None):
+    """Log the max gradient strength (G/cm) for the currently-selected
+    Probe and slice-select gradient axis (GradAxis). Since Probe is a
+    Parameter, this also gets auto-recorded in the resulting JCAMP file's
+    SpinFlow parameter block. Warns (does not fail) if the fitted probe's
+    selected axis has no calibration yet."""
+    probe_key = str(P.Probe).upper().replace('/', '').replace('-', '').replace(' ', '').replace('_', '')
+    axis_key = str(axis if axis is not None else getattr(P, "Axis", "z")).strip().lower()
+    if probe_key not in MAXGRAD_TABLE:
+        comms.log("WARNING: unrecognised Probe='{0}'. Known probes: {1}. "
+                  "Hz->mm conversion will not know this probe's gradient "
+                  "calibration.".format(P.Probe, list(MAXGRAD_TABLE)))
+        return
+    maxgrad = MAXGRAD_TABLE[probe_key].get(axis_key)
+    if maxgrad is None:
+        comms.log("WARNING: Probe='{0}', axis='{1}' has NO gradient "
+                  "calibration yet -- Hz->mm conversion is undefined for "
+                  "this data until it is measured.".format(P.Probe, axis_key))
+    else:
+        comms.log("Probe: {0}. Max gradient strength ({1}-axis) = {2} G/cm."
+                  .format(P.Probe, axis_key, maxgrad))
+
+
 def compute_excited_width(P, comms, pulse_width_us, R_value, shape_label):
     """Compute the excited slice bandwidth [Hz] and width [cm], using the
     R-value bandwidth-time product (see R_EBURP2_90 above) and the
@@ -717,6 +752,14 @@ class Parameters:
     ZGradNorm = Parameter("FPZ", 1.0, ParameterTypes.Double, "Z Grad Scaler [0.0&#8230;1.0]")
     Axis = Parameter("GradAxis", "z", ParameterTypes.String, "Slice-Select Gradient Axis")
     AxisList = Parameter("GradAxisList", "x,y,z", ParameterTypes.String, "Gradient Axes")
+    # Probe fitted to the magnet -- no automatic detection is possible, so
+    # this must be set MANUALLY to match what's actually mounted. Used only
+    # for logging/downstream Hz-to-mm conversion (see report_probe_gradient()
+    # above and leonmr/xpulse_imaging.py) -- has no effect on this pp's own
+    # timing/hardware calls. ProbeList pairs with Probe (same convention as
+    # GradAxisList/GradAxis) to give SpinFlow the actual dropdown choices.
+    Probe = Parameter("Probe", "HFX", ParameterTypes.String, "Probe fitted to magnet [HFX(default,calibrated)/Low Gamma(not yet calibrated)]")
+    ProbeList = Parameter("ProbeList", "HFX,Low Gamma", ParameterTypes.String, "Probe Options")
 
     RampTime = Parameter("D70", 200.0, ParameterTypes.Double, "Gradient Ramp Time [&#956;s]")
     GradSettle = Parameter("D73", 200.0, ParameterTypes.Double, "Gradient Settling Duration (before acquisition) [&#956;s]")
@@ -851,6 +894,8 @@ def run(comms):
               .format(P.LPMaxFraction, P.SlicePPM, P.FrequencyBase,
                       P.PulseOffsetTrim, PulseOffsetHz, Frequency))
 
+    report_probe_gradient(P, comms)
+
     rf_on_time = ExcitationPulseWidth
     grad_on_time = GradEventTime
     estimate_duty_cycles(P, rf_on_time, grad_on_time, comms)
@@ -975,5 +1020,19 @@ def run(comms):
 #    for-term sum matching run() exactly. Verified via the mock harness
 #    against LWG_Slice-Selective-PulseAcquire_H.py's result at matching
 #    default Parameters (2040516.0us, identical).
+#
+# 4. Claude - 18/08/26 - Added FULL Probe support at your request:
+#    this file had GradAxis/GradAxisList (a working axis selector) but was
+#    missing the Probe Parameter entirely -- the only gradient-using
+#    imaging file in this repo where that was true (found while auditing
+#    "everything that uses gradients for diffusion or imaging" against
+#    the Probe/ProbeList pairing added elsewhere). Added Probe/ProbeList
+#    (dropdown pairing, "HFX,Low Gamma", same convention as GradAxis/
+#    GradAxisList), MAXGRAD_TABLE, and report_probe_gradient() (reads the
+#    axis from P.Axis, matching the imaging family's own pattern -- e.g.
+#    LWG_CPMG-Image-Echo_H.py), called once in run(). Also added Probe
+#    and Dead1 to sequence_basic(). No change to timing/hardware calls --
+#    verified via the mock harness (Probe/gradient calibration now logs
+#    correctly).
 #
 # -----------------------------------------------------------------------------

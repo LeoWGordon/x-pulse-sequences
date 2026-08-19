@@ -12,7 +12,7 @@
 # Created:     04/08/2026
 # Revised:     07/08/2026
 # Copyright:   (c) Oxford Instruments Magnetic Resonance, 2013-
-# Version:     4.4
+# Version:     4.5
 #
 # IMPORTANT (v4.0): if your v3.0 profile was just 'burning a hole' at the
 # target frequency instead of forming a clean selective image, the most
@@ -207,7 +207,7 @@ def sequence_description():
 
 def sequence_basic():
 
-    basic = "NS,RD,NP,Filter,TAU,D70,D73,D71,D75,G1,GradAxis,P90sh,P180sh,PulseOffset"
+    basic = "NS,RD,NP,Filter,TAU,D70,D73,D71,D75,G1,GradAxis,P90sh,P180sh,PulseOffset,Probe,Dead1"
 
     return basic
 
@@ -1318,5 +1318,11 @@ def run(comms):
 #    hyphens, uppercase) already maps that to the unchanged MAXGRAD_TABLE
 #    key "LOWGAMMA", so no table changes were needed. Purely a Parameter-
 #    panel change -- no effect on timing/hardware calls.
+#
+# 16. Claude - 18/08/26 - Added Probe and Dead1 to sequence_basic() at
+#    your request, so both already-existing Parameters show up in
+#    SpinFlow's quick "basic parameters" panel rather than requiring the
+#    full parameter list to find/set them. No change to the Parameters
+#    themselves or to timing/hardware calls.
 #
 # -----------------------------------------------------------------------------

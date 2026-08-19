@@ -22,7 +22,7 @@
 #
 # Created:     11/08/2026
 # Copyright:   (c) Oxford Instruments Magnetic Resonance, 2013-
-# Version:     2.1 (draft) -- REVISED from v1.0 after L. Gordon supplied the
+# Version:     2.2 (draft) -- REVISED from v1.0 after L. Gordon supplied the
 #              vendor's own CPMG_H.py as a reference (see "WHAT CHANGED IN
 #              v2.0" below). v1.0's core mechanism (multiple Receiver1()
 #              calls within one scan, to acquire every echo from a single
@@ -297,7 +297,7 @@ def sequence_description():
 
 def sequence_basic():
 
-    basic = "NS,RD,NP,Filter,TAU,NECH,D70,D73,D71,D75,G1,GradAxis"
+    basic = "NS,RD,NP,Filter,TAU,NECH,D70,D73,D71,D75,G1,GradAxis,Probe,Dead1"
 
     return basic
 
@@ -712,5 +712,11 @@ def run(comms):
 #    hyphens, uppercase) already maps that to the unchanged MAXGRAD_TABLE
 #    key "LOWGAMMA", so no table changes were needed. Purely a Parameter-
 #    panel change -- no effect on timing/hardware calls.
+#
+# 4. Claude - 18/08/26 - Added Probe and Dead1 to sequence_basic() at
+#    your request, so both already-existing Parameters show up in
+#    SpinFlow's quick "basic parameters" panel rather than requiring the
+#    full parameter list to find/set them. No change to the Parameters
+#    themselves or to timing/hardware calls.
 #
 # -----------------------------------------------------------------------------
