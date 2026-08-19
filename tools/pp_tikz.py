@@ -235,7 +235,7 @@ LANE_ORDER = ['HF', 'X', 'GRAD1', 'GRAD2', 'GRAD3']
 LANE_LABEL = {'HF': 'H/F', 'X': 'X', 'GRAD1': 'G$_x$', 'GRAD2': 'G$_y$', 'GRAD3': 'G$_z$'}
 
 
-def render_tikz(events, total_time, seq_name, params):
+def render_tikz(events, total_time, seq_name, params, show_values=False):
     events = merge_gradient_trapezoids(events)
 
     active_lanes = [lane for lane in LANE_ORDER if any(e['lane'] == lane for e in events)]
@@ -282,14 +282,20 @@ def render_tikz(events, total_time, seq_name, params):
     lines.append("")
 
     # ---- Idle-gap break markers -- RD only, see headline_gaps() ----
+    # Labelled with the actual duration only when show_values=True; by
+    # default this shows the generic "Recycle Delay" name instead, since
+    # this gap is (per headline_gaps()'s own docstring) always RD in
+    # practice, and a schematic figure usually wants the delay NAMED, not
+    # its specific numeric value.
     for (a, b, pa, pb) in axis.headline_gaps():
         cx = (pa + pb) / 2.0
         top_y = max(y_of.values()) + PULSE_HEIGHT + 1.0
         bot_y = min(y_of.values()) - GRAD_HEIGHT - 0.6
+        gap_label = _fmt_us(b - a) if show_values else "Recycle Delay"
         lines.append("\\draw[densely dotted] ({0:.3f},{1:.3f})--({0:.3f},{2:.3f});"
                       .format(cx, top_y, bot_y))
         lines.append("\\node[above] at ({0:.3f},{1:.3f}) {{\\small {2}}};"
-                      .format(cx, top_y, _fmt_us(b - a)))
+                      .format(cx, top_y, gap_label))
 
     # ---- Per-lane events ----
     last_acqu = None  # (lane, x_end)
@@ -307,16 +313,12 @@ def render_tikz(events, total_time, seq_name, params):
                     full_label = "{0} {1}".format(label, _esc(shape_name)) if shape_name else label
                     pts = _downsample_profile(profile)
                     peak = max(abs(v) for (_, v) in pts) or 1.0
-                    y_mid = y + PULSE_HEIGHT / 2.0
-                    half_h = PULSE_HEIGHT / 2.0
                     curve_pts = ["({0:.3f},{1:.3f})".format(axis.px(e['t_start'] + t),
-                                                              y_mid + half_h * (v / peak))
+                                                              y + PULSE_HEIGHT * (v / peak))
                                  for (t, v) in pts]
-                    path = ("({0:.3f},{1:.3f})--".format(x0, y_mid) + "--".join(curve_pts) +
-                            "--({0:.3f},{1:.3f})--cycle".format(x0 + w, y_mid))
+                    path = ("({0:.3f},{1:.3f})--".format(x0, y) + "--".join(curve_pts) +
+                            "--({0:.3f},{1:.3f})--cycle".format(x0 + w, y))
                     lines.append("\\draw[thick, fill=black!30] {0};".format(path))
-                    lines.append("\\draw[densely dashed, gray] ({0:.3f},{1:.3f})--({2:.3f},{1:.3f});"
-                                  .format(x0, y_mid, x0 + w))
                     lines.append("\\node[above] at ({0:.3f},{1:.3f}) {{{2}}};"
                                   .format(x0 + w / 2.0, y + PULSE_HEIGHT + 0.15, full_label))
                 else:
@@ -326,9 +328,6 @@ def render_tikz(events, total_time, seq_name, params):
                                           x0, y, x0 + w, y + PULSE_HEIGHT))
             elif e['kind'] == 'acqu':
                 x0, w = axis.span(e['t_start'], e['t_end'])
-                lines.append("\\draw[ultra thick, |-|] ({0:.3f},{1:.3f})--({2:.3f},{1:.3f}) "
-                              "node[below=0.05,midway]{{\\small ACQU}};"
-                              .format(x0, y - 0.35, x0 + w))
                 last_acqu = (lane, x0 + w)
             elif e['kind'] == 'trapezoid':
                 verts = e['meta']['vertices']
@@ -408,7 +407,7 @@ def _esc(s):
     return str(s).replace('_', '\\_').replace('&', '\\&').replace('%', '\\%')
 
 
-def visualize_tikz(pp_path, overrides=None, output=None):
+def visualize_tikz(pp_path, overrides=None, output=None, show_values=False):
     """Trace pp_path and render a standalone TikZ (.tex) pulse-sequence
     diagram, styled to match Tex_figures/tex_files/ste_PFG.tex.
 
@@ -416,12 +415,17 @@ def visualize_tikz(pp_path, overrides=None, output=None):
     output: path to write the .tex to. Defaults to
         '<pp_path without .py>.pp.tex'. Pass output=False to skip
         writing to disk.
+    show_values: if True, label the recycle-delay break marker with its
+        actual duration (e.g. "1.92 s") instead of the default generic
+        "Recycle Delay" -- off by default (numbers are opt-in, not the
+        default, for a schematic figure). Gradient delta/Delta labels
+        always show their actual duration regardless of this flag.
 
     Returns {'tex': str, 'output_path': str or None, 'sequence_name': str}.
     """
     events, total_time, seq_name = trace_pp_file(pp_path, overrides)
     params = dump_params(pp_path, overrides)
-    tex = render_tikz(events, total_time, seq_name, params)
+    tex = render_tikz(events, total_time, seq_name, params, show_values=show_values)
 
     out_path = None
     if output is not False:
@@ -448,13 +452,17 @@ def main():
     ap.add_argument('-o', '--output', help="Output .tex path (default: alongside input, .pp.tex)")
     ap.add_argument('--set', action='append', dest='overrides', metavar='KEY=VALUE',
                      help="Override a Parameter before tracing (repeatable)")
+    ap.add_argument('--show-values', action='store_true',
+                     help="Label the recycle-delay break marker with its actual "
+                          "duration instead of the default generic 'Recycle Delay'")
     args = ap.parse_args()
 
     if not os.path.isfile(args.pp_file):
         raise SystemExit("No such file: {0}".format(args.pp_file))
 
     overrides = _parse_overrides(args.overrides)
-    result = visualize_tikz(args.pp_file, overrides=overrides, output=args.output)
+    result = visualize_tikz(args.pp_file, overrides=overrides, output=args.output,
+                             show_values=args.show_values)
     print("Wrote {0}".format(result['output_path']))
 
 
