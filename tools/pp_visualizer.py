@@ -9,10 +9,18 @@ recording every hardware call as a timed event, then renders the result
 as a self-contained HTML timing diagram with one lane per channel (H/F,
 X, and one lane per gradient axis actually used).
 
-Usage:
+Callable API (for interactive use -- REPL, notebook, another script):
+
+    from pp_visualizer import visualize
+    result = visualize("sequences/diffusion/LWG_PGSTE_H.py",
+                        overrides={"DELTA": 20000}, open_browser=True)
+    # result = {'svg':..., 'html':..., 'events':[...], 'total_time_us':...,
+    #           'sequence_name':..., 'output_path':...}
+
+CLI:
     python3 tools/pp_visualizer.py sequences/diffusion/LWG_PGSTE_H.py
     python3 tools/pp_visualizer.py sequences/diffusion/LWG_PGSTE_H.py -o out.html
-    python3 tools/pp_visualizer.py sequences/relaxation/LWG_CPMG_H.py --set EchoNumber=4 --set Tau=1000
+    python3 tools/pp_visualizer.py sequences/relaxation/LWG_CPMG_H.py --set EchoNumber=4 --open
 
 Only ONE scan's worth of timing is traced (NumScans/DS are forced to
 1/0 before run() is called) -- the per-scan structure is what's
@@ -42,6 +50,17 @@ Design notes on the timing model:
     a longer gap always gets modestly more width -- and always
     exactly-labelled with its real duration) so the interesting
     structure and the RD delay can both be seen on one diagram.
+  - GRADIENT PULSES ARE TRAPEZOIDS. A real gradient event is
+    ramp-up -- flat plateau (held for the "delta"/GradientOnTime
+    duration) -- ramp-down. In the pp source this looks like
+    Gradient3(RampTime, G1); Delay(delta); Gradient3(RampTime, 0) -- the
+    plateau is just a generic Delay(), invisible to a naive tracer. The
+    mock below tracks each gradient axis's held value explicitly and
+    synthesises an intermediate 'plateau' event spanning that Delay(),
+    then the renderer merges contiguous ramp/plateau events on one axis
+    into a single filled trapezoid polygon (with a delta<->delta arrow
+    labelling the hold time), instead of showing two disconnected
+    diagonal lines with a gap in between.
 
 Known limitations (v1):
   - Shaped pulses (shaped_pulse()'s `with parallel:` sub-branches of
@@ -52,16 +71,17 @@ Known limitations (v1):
     the shaped/selective-pulse family (LWG_Selective-Echo_H.py etc.).
   - Only traces one code path through run() -- e.g. an `if int(P.WetOn)`
     branch is traced with whatever WetOn value the Parameters carry
-    (default, or your --set override); it does not show both branches.
+    (default, or your --set/overrides value); it does not show both
+    branches.
 """
 
 import argparse
-import json
 import math
 import os
 import runpy
 import sys
 import types
+import webbrowser
 
 
 # =============================================================================
@@ -108,13 +128,15 @@ class Clock(object):
 def install_mock_firebird(clock, events):
     """Build and register sys.modules['firebird']/['firebird.applications'],
     wired to append timed events to `events` (a list of dicts) and advance
-    `clock`. Returns nothing; side-effects sys.modules."""
+    `clock`. Returns the mock's mutable state dict (mostly useful for
+    debugging); side-effects sys.modules."""
 
     state = {
-        'phase': {1: 0.0, 2: 0.0},       # Channel1/2SetBasePhase
-        'scale': {1: 1.0, 2: 1.0},       # Transmit1/2SetScale
-        'rx_phase': {1: 0.0, 2: 0.0},    # Receiver1/2Phase
-        'grad': {1: 0.0, 2: 0.0, 3: 0.0},  # current Gradient1/2/3 value
+        'phase': {1: 0.0, 2: 0.0},         # Channel1/2SetBasePhase
+        'scale': {1: 1.0, 2: 1.0},         # Transmit1/2SetScale
+        'rx_phase': {1: 0.0, 2: 0.0},      # Receiver1/2Phase
+        'grad': {1: 0.0, 2: 0.0, 3: 0.0},        # current Gradient1/2/3 value
+        'grad_since': {1: 0.0, 2: 0.0, 3: 0.0},  # time current value began
     }
 
     def emit(lane, kind, t_start, duration, **meta):
@@ -123,11 +145,6 @@ def install_mock_firebird(clock, events):
             't_start': t_start, 't_end': t_start + duration,
             'duration': duration, 'meta': meta,
         })
-
-    def _noop_advance(dt=0):
-        def fn(*a, **kw):
-            clock.advance(dt)
-        return fn
 
     fb = types.ModuleType('firebird')
     fbapp = types.ModuleType('firebird.applications')
@@ -195,7 +212,7 @@ def install_mock_firebird(clock, events):
         def fn(width, phase, shapename):
             t0 = clock.advance(width) - width
             emit('HF' if ch == 1 else 'X', 'pulse', t0, width,
-                 phase=phase, scale=state['scale'][ch], label='shaped:'+str(shapename))
+                 phase=phase, scale=state['scale'][ch], label='shaped:' + str(shapename))
         return fn
 
     fb.Transmit1 = _make_transmit(1)
@@ -214,7 +231,7 @@ def install_mock_firebird(clock, events):
     fb.Transmit2ShapedPulse = _make_shaped_pulse(2)
 
     # ---- Receiver ----
-    def _make_rx_config(ch, label):
+    def _make_rx_config(ch):
         def fn(duration, arg=None):
             clock.advance(duration)
         return fn
@@ -232,24 +249,40 @@ def install_mock_firebird(clock, events):
                  phase=state['rx_phase'][ch], points=points)
         return fn
 
-    fb.Receiver1Preamp = _make_rx_config(1, 'Preamp')
-    fb.Receiver2Preamp = _make_rx_config(2, 'Preamp')
-    fb.Receiver1Filter = _make_rx_config(1, 'Filter')
-    fb.Receiver2Filter = _make_rx_config(2, 'Filter')
-    fb.Receiver1FilterFlush = _make_rx_config(1, 'FilterFlush')
-    fb.Receiver2FilterFlush = _make_rx_config(2, 'FilterFlush')
+    fb.Receiver1Preamp = _make_rx_config(1)
+    fb.Receiver2Preamp = _make_rx_config(2)
+    fb.Receiver1Filter = _make_rx_config(1)
+    fb.Receiver2Filter = _make_rx_config(2)
+    fb.Receiver1FilterFlush = _make_rx_config(1)
+    fb.Receiver2FilterFlush = _make_rx_config(2)
     fb.Receiver1Phase = _make_rx_phase(1)
     fb.Receiver2Phase = _make_rx_phase(2)
     fb.Receiver1 = _make_receiver(1)
     fb.Receiver2 = _make_receiver(2)
 
-    # ---- Gradients ----
+    # ---- Gradients: track held value per axis, synthesise a 'plateau'
+    # event spanning whatever Delay() happens while a nonzero value is
+    # held, so ramp+plateau+ramp can be rendered as one true trapezoid. ----
     def _make_gradient(axis):
+        lane = 'GRAD{0}'.format(axis)
+
         def fn(ramp_time, value):
-            t0 = clock.advance(ramp_time) - ramp_time
+            t_ramp_start = clock.t
             v0 = state['grad'][axis]
+            if value == v0:
+                # Degenerate/safety call (e.g. "Gradient3(1,0)" when
+                # already at 0) -- just advance the clock, no event, and
+                # don't disturb the held-since bookkeeping.
+                clock.advance(ramp_time)
+                return
+            since = state['grad_since'][axis]
+            if v0 != 0 and t_ramp_start > since:
+                emit(lane, 'plateau', since, t_ramp_start - since, value=v0)
+            clock.advance(ramp_time)
+            t_ramp_end = clock.t
+            emit(lane, 'ramp', t_ramp_start, ramp_time, value_from=v0, value_to=value)
             state['grad'][axis] = value
-            emit('GRAD{0}'.format(axis), 'ramp', t0, ramp_time, value_from=v0, value_to=value)
+            state['grad_since'][axis] = t_ramp_end
         return fn
 
     def _make_gradient_slew(axis):
@@ -286,6 +319,7 @@ def install_mock_firebird(clock, events):
     class _TXStub(object):
         def setup_receive(self, *a, **kw):
             pass
+
         def wait_for_data(self, scan, total, callback):
             import numpy as np
             npoints = 16
@@ -299,6 +333,7 @@ def install_mock_firebird(clock, events):
         def __enter__(self):
             clock.enter_sequential()
             return self
+
         def __exit__(self, *exc):
             clock.exit_sequential()
             return False
@@ -307,6 +342,7 @@ def install_mock_firebird(clock, events):
         def __enter__(self):
             clock.enter_parallel()
             return self
+
         def __exit__(self, *exc):
             clock.exit_parallel()
             return False
@@ -327,8 +363,10 @@ def install_mock_firebird(clock, events):
         def __init__(self, phase_str):
             self.phases = [float(x) for x in str(phase_str).split(",") if x.strip() != ""] or [0.0]
             self.idx = 0
+
         def Reset(self):
             self.idx = 0
+
         def Inc(self):
             v = self.phases[self.idx % len(self.phases)]
             self.idx += 1
@@ -353,9 +391,11 @@ def install_mock_firebird(clock, events):
                         "but its value {2!r} is not a string.".format(
                             type(value).__name__, name, value))
                 self._containers[name] = PhaseListContainer(value)
+
         def Reset(self):
             for c in self._containers.values():
                 c.Reset()
+
         def Incd(self):
             return dict((name, c.Inc()) for name, c in self._containers.items())
     fb.PhasesManager = PhasesManager
@@ -379,8 +419,10 @@ def install_mock_firebird(clock, events):
     class Parameter(object):
         def __init__(self, code, default, ptype, desc, validator=None, **kw):
             self.code, self.default = code, default
+
         def __get__(self, obj, objtype=None):
             return self.default
+
         def __set__(self, obj, value):
             self.default = value
     fb.Parameter = Parameter
@@ -399,6 +441,7 @@ def install_mock_firebird(clock, events):
 class FakeComms(object):
     def log(self, msg):
         pass
+
     def send_data(self, *a, **kw):
         pass
 
@@ -407,6 +450,52 @@ class FakeComms(object):
 # Tracing
 # =============================================================================
 
+def _apply_overrides(P, overrides):
+    if not overrides:
+        return
+    for key, value in overrides.items():
+        if not hasattr(P, key):
+            raise ValueError("Unknown Parameter '{0}' (not found on this file's "
+                              "Parameters class).".format(key))
+        current = getattr(P, key)
+        caster = type(current) if not isinstance(current, bool) else str
+        try:
+            setattr(P, key, caster(value))
+        except (TypeError, ValueError):
+            setattr(P, key, value)
+
+
+def _load_parameters(pp_path, overrides=None):
+    """runpy-load pp_path fresh (mock must already be installed in
+    sys.modules) and return (module_dict, Parameters class), with
+    NumScans/DS forced to 1/0 and overrides applied."""
+    mod = runpy.run_path(pp_path)
+    P = mod['Parameters']
+    P.NumScans = 1
+    P.DS = 0
+    _apply_overrides(P, overrides)
+    return mod, P
+
+
+def dump_params(pp_path, overrides=None):
+    """Return a name->value dict of every Parameter default on pp_path,
+    with overrides applied -- does NOT need the mock installed first
+    (safe to call standalone)."""
+    clock = Clock()
+    install_mock_firebird(clock, [])
+    mod, P = _load_parameters(pp_path, overrides)
+    cls = type(P)
+    out = {}
+    for name in sorted(dir(cls)):
+        if name.startswith('_'):
+            continue
+        val = getattr(P, name)
+        if callable(val):
+            continue
+        out[name] = val
+    return out
+
+
 def trace_pp_file(pp_path, overrides=None):
     """Run one scan of pp_path's run() through the instrumented mock and
     return (events, total_time_us, sequence_name)."""
@@ -414,69 +503,100 @@ def trace_pp_file(pp_path, overrides=None):
     events = []
     install_mock_firebird(clock, events)
 
-    # Force a clean re-import of the target module each call (avoid stale
-    # sys.modules entries if this is invoked more than once in-process).
-    mod_name = None
-    for name in list(sys.modules):
-        if name == 'Parameters':
-            del sys.modules[name]
-
-    mod = runpy.run_path(pp_path)
-    P = mod['Parameters']
-
-    # Only one scan's worth of timing is interesting.
-    P.NumScans = 1
-    P.DS = 0
-
-    if overrides:
-        for key, value in overrides.items():
-            if not hasattr(P, key):
-                raise SystemExit("Unknown Parameter '{0}' for --set (not found on "
-                                  "this file's Parameters class).".format(key))
-            current = getattr(P, key)
-            caster = type(current) if not isinstance(current, bool) else str
-            try:
-                setattr(P, key, caster(value))
-            except (TypeError, ValueError):
-                setattr(P, key, value)
-
+    mod, P = _load_parameters(pp_path, overrides)
     mod['run'](FakeComms())
 
     seq_name = getattr(P, 'Sequence', os.path.basename(pp_path))
     return events, clock.t, seq_name
 
 
+def merge_gradient_trapezoids(events):
+    """Merge contiguous ramp/plateau events on each GRAD lane into single
+    filled-trapezoid composite events (kind='trapezoid'), tracing the
+    actual v(t) path of the gradient coil -- ramp up, flat top for the
+    held ("delta") duration, ramp down -- instead of two disconnected
+    diagonal 'ramp' lines with an invisible gap where the plateau was."""
+    by_lane = {}
+    passthrough = []
+    for e in events:
+        if e['lane'].startswith('GRAD') and e['kind'] in ('ramp', 'plateau'):
+            by_lane.setdefault(e['lane'], []).append(e)
+        else:
+            passthrough.append(e)
+
+    trapezoids = []
+    for lane, evs in by_lane.items():
+        evs = sorted(evs, key=lambda e: e['t_start'])
+        run = []
+        for e in evs:
+            if run and abs(e['t_start'] - run[-1]['t_end']) < 1e-6:
+                run.append(e)
+            else:
+                if run:
+                    trapezoids.append(_trapezoid_from_run(lane, run))
+                run = [e]
+        if run:
+            trapezoids.append(_trapezoid_from_run(lane, run))
+    return passthrough + trapezoids
+
+
+def _trapezoid_from_run(lane, run):
+    verts = []
+    for e in run:
+        if e['kind'] == 'ramp':
+            if not verts:
+                verts.append((e['t_start'], e['meta']['value_from']))
+            verts.append((e['t_end'], e['meta']['value_to']))
+        else:  # plateau
+            v = e['meta']['value']
+            if not verts:
+                verts.append((e['t_start'], v))
+            verts.append((e['t_end'], v))
+    t_start, t_end = run[0]['t_start'], run[-1]['t_end']
+    peak = max((abs(v) for _, v in verts), default=0.0)
+    plateaus = [(e['t_start'], e['t_end'], e['meta']['value'])
+                for e in run if e['kind'] == 'plateau' and e['duration'] > 0]
+    return {
+        'lane': lane, 'kind': 'trapezoid',
+        't_start': t_start, 't_end': t_end, 'duration': t_end - t_start,
+        'meta': {'vertices': verts, 'peak': peak, 'plateaus': plateaus},
+    }
+
+
 # =============================================================================
-# Rendering
+# Rendering (HTML/SVG)
 # =============================================================================
 
 LANE_ORDER_HINT = ['HF', 'X', 'GRAD1', 'GRAD2', 'GRAD3', 'TRIGGER']
 LANE_LABELS = {
-    'HF': 'H/F channel',
-    'X': 'X channel',
-    'GRAD1': 'Gradient 1 (typ. X)',
-    'GRAD2': 'Gradient 2 (typ. Y)',
-    'GRAD3': 'Gradient 3 (typ. Z)',
+    'HF': 'H/F',
+    'X': 'X',
+    'GRAD1': 'Grad 1 (x)',
+    'GRAD2': 'Grad 2 (y)',
+    'GRAD3': 'Grad 3 (z)',
     'TRIGGER': 'Trigger',
 }
 
-EVENT_PX_PER_US = 0.09      # true-to-scale width for actual events
-GAP_BASE_PX = 14.0          # minimum width for any idle gap
-GAP_LOG_PX = 13.0           # log-scale coefficient for idle gap width
-GAP_COMPRESS_THRESHOLD = 60.0  # gaps shorter than this render at true scale
-LANE_HEIGHT = 46
-LANE_GAP = 14
-LEFT_MARGIN = 170
-TOP_MARGIN = 70
+EVENT_PX_PER_US = 0.10          # true-to-scale width for actual events
+GAP_BASE_PX = 16.0               # minimum width for any idle gap
+GAP_LOG_PX = 14.0                # log-scale coefficient for idle gap width
+GAP_COMPRESS_THRESHOLD = 60.0    # gaps shorter than this render at true scale
+LANE_HEIGHT = 52
+LANE_GAP = 18
+LEFT_MARGIN = 110
+TOP_MARGIN = 78
 RIGHT_MARGIN = 40
-BOTTOM_MARGIN = 60
+BOTTOM_MARGIN = 30
 
-LANE_COLORS = {
-    'pulse': '#4C78E8',
-    'acqu': '#E8674C',
-    'ramp': '#3FAE6B',
-    'config': '#B0B7C3',
-    'marker': '#C9A227',
+# A calm, colorblind-considerate categorical palette (dark-theme-first;
+# same hues carry into the light-theme CSS variables below).
+COLORS = {
+    'pulse': '#6C8EF5',
+    'pulse_text': '#0b1220',
+    'acqu': '#F0955C',
+    'grad': '#3FC08A',
+    'config': '#8A93A6',
+    'marker': '#E0B84B',
 }
 
 
@@ -486,76 +606,74 @@ def _fmt_us(v):
         return "{0:.3f} s".format(v / 1.0e6)
     if v >= 1000.0:
         return "{0:.3f} ms".format(v / 1000.0)
-    return "{0:.1f} us".format(v)
+    return "{0:.1f} µs".format(v)
 
 
-def build_time_transform(events, total_time):
-    """Return (px_for(t_start, duration) -> (x, width), total_px), using
-    true-to-scale widths for event durations and log-compressed widths
-    for idle gaps between them."""
-    boundaries = set([0.0, total_time])
-    for e in events:
-        boundaries.add(e['t_start'])
-        boundaries.add(e['t_end'])
-    boundaries = sorted(boundaries)
+def _esc(s):
+    return (str(s).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+            .replace('"', '&quot;'))
 
-    occupied = []
-    for e in events:
-        if e['duration'] > 0:
-            occupied.append((e['t_start'], e['t_end']))
-    occupied.sort()
-    merged = []
-    for s, en in occupied:
-        if merged and s <= merged[-1][1]:
-            merged[-1] = (merged[-1][0], max(merged[-1][1], en))
-        else:
-            merged.append((s, en))
 
-    segments = []  # (t0, t1, is_event)
-    cursor = 0.0
-    for s, en in merged:
-        if s > cursor:
-            segments.append((cursor, s, False))
-        segments.append((s, en, True))
-        cursor = en
-    if cursor < total_time:
-        segments.append((cursor, total_time, False))
+class TimeAxis(object):
+    """Piecewise time->pixel mapping: actual event durations render true
+    to scale; idle gaps beyond GAP_COMPRESS_THRESHOLD render log-
+    compressed (still monotonic, always exactly labelled)."""
 
-    px_map = []  # (t0, t1, px0, px1)
-    px_cursor = 0.0
-    for t0, t1, is_event in segments:
-        dur = t1 - t0
-        if dur <= 0:
-            continue
-        if is_event:
-            width = dur * EVENT_PX_PER_US
-        elif dur <= GAP_COMPRESS_THRESHOLD:
-            width = dur * EVENT_PX_PER_US
-        else:
-            width = GAP_BASE_PX + GAP_LOG_PX * math.log10(1.0 + dur)
-        px_map.append((t0, t1, px_cursor, px_cursor + width))
-        px_cursor += width
+    def __init__(self, events, total_time):
+        occupied = sorted((e['t_start'], e['t_end']) for e in events if e['duration'] > 0)
+        merged = []
+        for s, en in occupied:
+            if merged and s <= merged[-1][1]:
+                merged[-1] = (merged[-1][0], max(merged[-1][1], en))
+            else:
+                merged.append((s, en))
 
-    def transform(t0, t1):
-        for (a, b, pa, pb) in px_map:
-            if a <= t0 <= b + 1e-9:
-                if b > a:
-                    x0 = pa + (pb - pa) * (t0 - a) / (b - a)
-                else:
-                    x0 = pa
-                x1 = pa + (pb - pa) * (min(t1, b) - a) / (b - a) if b > a else pb
-                if t1 > b:
-                    for (a2, b2, pa2, pb2) in px_map:
-                        if a2 <= t1 <= b2 + 1e-9:
-                            x1 = pa2 + (pb2 - pa2) * (t1 - a2) / (b2 - a2) if b2 > a2 else pb2
-                            break
-                return x0, max(x1 - x0, 0.5)
-        return px_cursor, 0.5
+        segments = []
+        cursor = 0.0
+        for s, en in merged:
+            if s > cursor:
+                segments.append((cursor, s, False))
+            segments.append((s, en, True))
+            cursor = en
+        if cursor < total_time:
+            segments.append((cursor, total_time, False))
 
-    return transform, px_cursor, px_map, segments
+        self.px_map = []
+        px_cursor = 0.0
+        for t0, t1, is_event in segments:
+            dur = t1 - t0
+            if dur <= 0:
+                continue
+            if is_event or dur <= GAP_COMPRESS_THRESHOLD:
+                width = dur * EVENT_PX_PER_US
+            else:
+                width = GAP_BASE_PX + GAP_LOG_PX * math.log10(1.0 + dur)
+            self.px_map.append((t0, t1, px_cursor, px_cursor + width))
+            px_cursor += width
+        self.total_px = px_cursor
+
+    def px(self, t):
+        for (a, b, pa, pb) in self.px_map:
+            if a <= t <= b + 1e-9:
+                return pa if b <= a else pa + (pb - pa) * (t - a) / (b - a)
+        return self.total_px
+
+    def span(self, t0, t1):
+        x0, x1 = self.px(t0), self.px(t1)
+        return x0, max(x1 - x0, 0.6)
+
+    def gaps(self):
+        return [(a, b, pa, pb) for (a, b, pa, pb) in self.px_map if (b - a) > GAP_COMPRESS_THRESHOLD]
+
+
+def _lane_y_for_value(v, lane_top, lane_bot):
+    v = max(-1.0, min(1.0, float(v)))
+    return lane_bot - (v + 1.0) / 2.0 * (lane_bot - lane_top)
 
 
 def render_svg(events, total_time, seq_name, src_name):
+    events = merge_gradient_trapezoids(events)
+
     active_lanes = []
     seen = set()
     for hint in LANE_ORDER_HINT:
@@ -569,138 +687,242 @@ def render_svg(events, total_time, seq_name, src_name):
     if not active_lanes:
         active_lanes = ['HF']
 
-    transform, total_px, px_map, segments = build_time_transform(events, total_time)
-    width = LEFT_MARGIN + total_px + RIGHT_MARGIN
+    axis = TimeAxis(events, total_time)
+    width = LEFT_MARGIN + axis.total_px + RIGHT_MARGIN
     height = TOP_MARGIN + len(active_lanes) * (LANE_HEIGHT + LANE_GAP) + BOTTOM_MARGIN
 
     svg = []
     svg.append('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {0:.0f} {1:.0f}" '
-                'width="100%" style="min-width:{0:.0f}px" font-family="ui-monospace,Menlo,monospace">'
+                'width="100%" style="min-width:{0:.0f}px" '
+                'font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif">'
                 .format(width, height))
-    svg.append('<rect x="0" y="0" width="{0:.0f}" height="{1:.0f}" fill="var(--bg,#0e1117)"/>'
+    svg.append('<rect x="0" y="0" width="{0:.0f}" height="{1:.0f}" fill="var(--pv-bg)"/>'
                 .format(width, height))
 
-    svg.append('<text x="{0}" y="28" font-size="16" font-weight="600" fill="var(--fg,#e6e6e6)">{1}</text>'
-                .format(LEFT_MARGIN, seq_name))
-    svg.append('<text x="{0}" y="46" font-size="11" fill="var(--muted,#9aa4b2)">{1} -- total {2} '
-                '(one scan; idle gaps &gt;{3:.0f}us log-compressed, hover for exact values)</text>'
-                .format(LEFT_MARGIN, src_name, _fmt_us(total_time), GAP_COMPRESS_THRESHOLD))
+    svg.append('<text x="{0}" y="26" font-size="16" font-weight="600" fill="var(--pv-fg)">{1}</text>'
+                .format(LEFT_MARGIN, _esc(seq_name)))
+    svg.append('<text x="{0}" y="44" font-size="11" fill="var(--pv-muted)">{1} — total {2} '
+                '(one scan; idle gaps &gt;{3:.0f}µs log-compressed, hover any element for exact values)</text>'
+                .format(LEFT_MARGIN, _esc(src_name), _fmt_us(total_time), GAP_COMPRESS_THRESHOLD))
 
-    # gap break markers + axis ticks along the top
-    for (a, b, pa, pb) in px_map:
-        dur = b - a
-        if dur > GAP_COMPRESS_THRESHOLD:
-            cx = LEFT_MARGIN + (pa + pb) / 2.0
-            svg.append('<line x1="{0:.1f}" y1="{1}" x2="{0:.1f}" y2="{2}" stroke="var(--grid,#2a2f3a)" '
-                        'stroke-width="1" stroke-dasharray="3,3"/>'
-                        .format(cx, TOP_MARGIN - 14, height - BOTTOM_MARGIN))
-            svg.append('<text x="{0:.1f}" y="{1}" font-size="10" fill="var(--muted,#9aa4b2)" '
-                        'text-anchor="middle">{2}</text>'
-                        .format(cx, TOP_MARGIN - 18, _fmt_us(dur)))
+    # Legend
+    legend = [('pulse', 'RF pulse'), ('acqu', 'Acquisition'), ('grad', 'Gradient'), ('marker', 'Trigger')]
+    lx = LEFT_MARGIN
+    for kind, label in legend:
+        svg.append('<rect x="{0}" y="54" width="10" height="10" rx="2" fill="{1}"/>'
+                    .format(lx, COLORS[kind]))
+        svg.append('<text x="{0}" y="63" font-size="10" fill="var(--pv-muted)">{1}</text>'
+                    .format(lx + 14, _esc(label)))
+        lx += 20 + 7 * len(label)
+
+    # Gap break markers + duration labels along the top
+    for (a, b, pa, pb) in axis.gaps():
+        cx = LEFT_MARGIN + (pa + pb) / 2.0
+        svg.append('<line x1="{0:.1f}" y1="{1}" x2="{0:.1f}" y2="{2}" stroke="var(--pv-grid)" '
+                    'stroke-width="1" stroke-dasharray="2,3"/>'
+                    .format(cx, TOP_MARGIN - 14, height - BOTTOM_MARGIN))
+        svg.append('<text x="{0:.1f}" y="{1}" font-size="10" fill="var(--pv-muted)" '
+                    'text-anchor="middle">{2}</text>'
+                    .format(cx, TOP_MARGIN - 18, _fmt_us(b - a)))
 
     for i, lane in enumerate(active_lanes):
         y0 = TOP_MARGIN + i * (LANE_HEIGHT + LANE_GAP)
         y_mid = y0 + LANE_HEIGHT / 2.0
+        is_grad = lane.startswith('GRAD')
         label = LANE_LABELS.get(lane, lane)
-        svg.append('<text x="{0}" y="{1:.1f}" font-size="12" fill="var(--fg,#e6e6e6)" '
+
+        svg.append('<rect x="0" y="{0:.1f}" width="{1:.0f}" height="{2}" fill="var(--pv-lane-bg)"/>'
+                    .format(y0 - 4, width, LANE_HEIGHT + 8))
+        svg.append('<text x="{0}" y="{1:.1f}" font-size="12" font-weight="600" fill="var(--pv-fg)" '
                     'text-anchor="end" dominant-baseline="middle">{2}</text>'
-                    .format(LEFT_MARGIN - 12, y_mid, label))
-        svg.append('<line x1="{0}" y1="{1:.1f}" x2="{2:.0f}" y2="{1:.1f}" stroke="var(--grid,#2a2f3a)" '
-                    'stroke-width="1"/>'.format(LEFT_MARGIN, y_mid, width - RIGHT_MARGIN))
+                    .format(LEFT_MARGIN - 14, y_mid, _esc(label)))
+
+        if is_grad:
+            lane_top, lane_bot = y0 + 6, y0 + LANE_HEIGHT - 6
+            for tick_v, tick_label in ((1.0, '+1'), (0.0, '0'), (-1.0, '−1')):
+                ty = _lane_y_for_value(tick_v, lane_top, lane_bot)
+                svg.append('<line x1="{0}" y1="{1:.1f}" x2="{2:.0f}" y2="{1:.1f}" '
+                            'stroke="var(--pv-grid)" stroke-width="1" '
+                            'stroke-dasharray="{3}"/>'
+                            .format(LEFT_MARGIN, ty, width - RIGHT_MARGIN,
+                                    "1,0" if tick_v == 0 else "2,4"))
+                svg.append('<text x="{0}" y="{1:.1f}" font-size="9" fill="var(--pv-muted)" '
+                            'text-anchor="end" dominant-baseline="middle">{2}</text>'
+                            .format(LEFT_MARGIN - 3, ty, tick_label))
+        else:
+            svg.append('<line x1="{0}" y1="{1:.1f}" x2="{2:.0f}" y2="{1:.1f}" '
+                        'stroke="var(--pv-grid)" stroke-width="1"/>'
+                        .format(LEFT_MARGIN, y_mid, width - RIGHT_MARGIN))
 
         for e in events:
             if e['lane'] != lane:
                 continue
-            x, w = transform(e['t_start'], e['t_end'])
-            x += LEFT_MARGIN
-            color = LANE_COLORS.get(e['kind'], '#888')
-            title_bits = ["t={0}".format(_fmt_us(e['t_start'])), "dur={0}".format(_fmt_us(e['duration']))]
-            for k, v in e['meta'].items():
-                title_bits.append("{0}={1}".format(k, v))
-            title = " ".join(title_bits)
-
-            if e['kind'] == 'ramp':
-                v0 = e['meta'].get('value_from', 0.0)
-                v1 = e['meta'].get('value_to', 0.0)
-                lane_top = y0 + 6
-                lane_bot = y0 + LANE_HEIGHT - 6
-                def y_for(v):
-                    v = max(-1.0, min(1.0, float(v)))
-                    return lane_bot - (v - (-1.0)) / 2.0 * (lane_bot - lane_top)
-                y_a, y_b = y_for(v0), y_for(v1)
-                svg.append('<polyline points="{0:.1f},{1:.1f} {2:.1f},{3:.1f}" stroke="{4}" '
-                            'stroke-width="3" fill="none"><title>{5}</title></polyline>'
-                            .format(x, y_a, x + w, y_b, color, title))
-            elif e['kind'] == 'marker':
-                svg.append('<circle cx="{0:.1f}" cy="{1:.1f}" r="4" fill="{2}"><title>{3}</title></circle>'
-                            .format(x, y_mid, color, title))
-            elif e['kind'] == 'config':
-                svg.append('<rect x="{0:.1f}" y="{1:.1f}" width="{2:.1f}" height="4" fill="{3}" '
-                            'opacity="0.6"><title>{4}</title></rect>'
-                            .format(x, y0 + LANE_HEIGHT - 4, max(w, 1.5), color, title))
-            else:
-                ry = y0 + 6 if e['kind'] == 'pulse' else y0 + 6
-                rh = LANE_HEIGHT - 12
-                rx_style = 'fill="{0}"'.format(color) if e['kind'] == 'pulse' else \
-                           'fill="none" stroke="{0}" stroke-width="2" stroke-dasharray="4,2"'.format(color)
-                svg.append('<rect x="{0:.1f}" y="{1:.1f}" width="{2:.1f}" height="{3:.1f}" rx="3" {4}>'
-                            '<title>{5}</title></rect>'
-                            .format(x, ry, max(w, 1.5), rh, rx_style, title))
-                if w > 24:
-                    label_txt = e['meta'].get('label')
-                    if not label_txt:
-                        if e['kind'] == 'pulse':
-                            label_txt = "ph={0:g}".format(e['meta'].get('phase', 0))
-                        elif e['kind'] == 'acqu':
-                            label_txt = "ACQU"
-                    if label_txt:
-                        svg.append('<text x="{0:.1f}" y="{1:.1f}" font-size="9" '
-                                    'fill="{2}" text-anchor="middle" dominant-baseline="middle" '
-                                    'pointer-events="none">{3}</text>'
-                                    .format(x + w / 2.0, y_mid, '#0e1117' if e['kind'] == 'pulse' else color, label_txt))
+            _render_event(svg, e, axis, y0, y_mid)
 
     svg.append('</svg>')
     return "\n".join(svg)
+
+
+def _render_event(svg, e, axis, y0, y_mid):
+    x, w = axis.span(e['t_start'], e['t_end'])
+    x += LEFT_MARGIN
+    kind = e['kind']
+    title_bits = ["t={0}".format(_fmt_us(e['t_start'])), "dur={0}".format(_fmt_us(e['duration']))]
+    for k, v in e['meta'].items():
+        if k in ('vertices', 'plateaus'):
+            continue
+        title_bits.append("{0}={1}".format(k, v))
+    title = _esc(" ".join(title_bits))
+
+    if kind == 'trapezoid':
+        lane_top, lane_bot = y0 + 6, y0 + LANE_HEIGHT - 6
+        baseline_y = _lane_y_for_value(0, lane_top, lane_bot)
+        verts = e['meta']['vertices']
+        pts = [(axis.px(verts[0][0]) + LEFT_MARGIN, baseline_y)]
+        for (t, v) in verts:
+            pts.append((axis.px(t) + LEFT_MARGIN, _lane_y_for_value(v, lane_top, lane_bot)))
+        pts.append((axis.px(verts[-1][0]) + LEFT_MARGIN, baseline_y))
+        pts_str = " ".join("{0:.1f},{1:.1f}".format(px, py) for px, py in pts)
+        svg.append('<polygon points="{0}" fill="{1}" fill-opacity="0.55" '
+                    'stroke="{1}" stroke-width="1.5" stroke-linejoin="round">'
+                    '<title>{2}</title></polygon>'.format(pts_str, COLORS['grad'], title))
+        for (pt0, pt1, pv) in e['meta']['plateaus']:
+            px0, pw = axis.span(pt0, pt1)
+            px0 += LEFT_MARGIN
+            if pw < 14:
+                continue
+            arrow_y = _lane_y_for_value(pv, lane_top, lane_bot) + (-10 if pv >= 0 else 10)
+            svg.append('<line x1="{0:.1f}" y1="{1:.1f}" x2="{2:.1f}" y2="{1:.1f}" '
+                        'stroke="var(--pv-fg)" stroke-width="1" marker-start="url(#pv-arrow)" '
+                        'marker-end="url(#pv-arrow)"/>'.format(px0, arrow_y, px0 + pw))
+            if pw > 22:
+                svg.append('<text x="{0:.1f}" y="{1:.1f}" font-size="9" fill="var(--pv-fg)" '
+                            'text-anchor="middle">δ</text>'
+                            .format(px0 + pw / 2.0, arrow_y - 4))
+        return
+
+    if kind == 'marker':
+        svg.append('<circle cx="{0:.1f}" cy="{1:.1f}" r="4" fill="{2}"><title>{3}</title></circle>'
+                    .format(x, y_mid, COLORS['marker'], title))
+        return
+
+    if kind == 'config':
+        svg.append('<rect x="{0:.1f}" y="{1:.1f}" width="{2:.1f}" height="4" fill="{3}" '
+                    'opacity="0.6"><title>{4}</title></rect>'
+                    .format(x, y0 + LANE_HEIGHT - 4, max(w, 1.5), COLORS['config'], title))
+        return
+
+    # pulse / acqu
+    ry, rh = y0 + 6, LANE_HEIGHT - 12
+    color = COLORS['pulse'] if kind == 'pulse' else COLORS['acqu']
+    style = 'fill="{0}"'.format(color) if kind == 'pulse' else \
+        'fill="{0}" fill-opacity="0.35" stroke="{0}" stroke-width="1.5"'.format(color)
+    svg.append('<rect x="{0:.1f}" y="{1:.1f}" width="{2:.1f}" height="{3:.1f}" rx="4" {4}>'
+                '<title>{5}</title></rect>'
+                .format(x, ry, max(w, 1.5), rh, style, title))
+    if w > 26:
+        label_txt = e['meta'].get('label')
+        if not label_txt:
+            if kind == 'pulse':
+                label_txt = "φ={0:g}°".format(e['meta'].get('phase', 0))
+            else:
+                label_txt = "ACQU"
+        text_color = COLORS['pulse_text'] if kind == 'pulse' else 'var(--pv-fg)'
+        svg.append('<text x="{0:.1f}" y="{1:.1f}" font-size="9.5" '
+                    'fill="{2}" text-anchor="middle" dominant-baseline="middle" '
+                    'pointer-events="none">{3}</text>'
+                    .format(x + w / 2.0, y_mid, text_color, _esc(label_txt)))
 
 
 def render_html(svg, seq_name, pp_path, param_summary):
     return """<!doctype html>
 <title>{title}</title>
 <style>
-  :root {{ --bg:#0e1117; --fg:#e6e6e6; --muted:#9aa4b2; --grid:#2a2f3a; }}
-  @media (prefers-color-scheme: light) {{
-    :root:not([data-theme="dark"]) {{ --bg:#ffffff; --fg:#1a1a1a; --muted:#6b7280; --grid:#e2e5eb; }}
+  :root {{
+    --pv-bg:#0f1117; --pv-fg:#e7e9ee; --pv-muted:#8b93a5;
+    --pv-grid:#262b38; --pv-lane-bg:#161a24;
   }}
-  :root[data-theme="light"] {{ --bg:#ffffff; --fg:#1a1a1a; --muted:#6b7280; --grid:#e2e5eb; }}
-  body {{ margin:0; background:var(--bg); color:var(--fg); font-family: -apple-system, sans-serif; }}
-  .wrap {{ padding: 20px; overflow-x: auto; }}
-  .params {{ padding: 0 20px 20px; font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: var(--muted); white-space: pre-wrap; }}
-  h2 {{ font-size: 13px; color: var(--muted); font-weight: 500; margin: 0 0 6px; }}
+  @media (prefers-color-scheme: light) {{
+    :root:not([data-theme="dark"]) {{
+      --pv-bg:#ffffff; --pv-fg:#15181f; --pv-muted:#5b6472;
+      --pv-grid:#e6e9f0; --pv-lane-bg:#f6f7fb;
+    }}
+  }}
+  :root[data-theme="light"] {{
+    --pv-bg:#ffffff; --pv-fg:#15181f; --pv-muted:#5b6472;
+    --pv-grid:#e6e9f0; --pv-lane-bg:#f6f7fb;
+  }}
+  body {{ margin:0; background:var(--pv-bg); color:var(--pv-fg);
+          font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif; }}
+  .wrap {{ padding:20px; overflow-x:auto; }}
+  .params {{ padding:0 20px 24px; font-family:ui-monospace,Menlo,monospace;
+             font-size:12px; color:var(--pv-muted); white-space:pre-wrap; }}
+  h2 {{ font-size:13px; color:var(--pv-muted); font-weight:600; margin:0 0 8px; }}
+  svg text {{ user-select:none; }}
 </style>
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <marker id="pv-arrow" viewBox="0 0 8 8" refX="4" refY="4" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+      <path d="M0,0 L8,4 L0,8" fill="none" stroke="var(--pv-fg)" stroke-width="1.5"/>
+    </marker>
+  </defs>
+</svg>
 <div class="wrap">
 {svg}
 </div>
 <div class="params">
 <h2>Parameters used for this trace ({pp_path})</h2>{params}
 </div>
-""".format(title=seq_name, svg=svg, pp_path=pp_path, params=param_summary)
+""".format(title=_esc(seq_name), svg=svg, pp_path=_esc(pp_path), params=_esc(param_summary))
 
 
-def summarize_params(pp_path):
-    mod = runpy.run_path(pp_path, run_name="__paramdump__")
-    P = mod['Parameters']
-    lines = []
-    for name in sorted(dir(P)):
-        if name.startswith('_'):
-            continue
-        val = getattr(P, name)
-        if callable(val):
-            continue
-        lines.append("{0} = {1}".format(name, val))
-    return "\n".join(lines)
+# =============================================================================
+# Public callable API
+# =============================================================================
+
+def visualize(pp_path, overrides=None, output=None, open_browser=False):
+    """Trace pp_path and render an HTML timing diagram.
+
+    overrides: dict of {ParameterName: value} to apply before tracing
+        (e.g. {"DELTA": 20000, "EchoNumber": 4}).
+    output: path to write the HTML to. Defaults to
+        '<pp_path without .py>.timing.html'. Pass output=False to skip
+        writing to disk (useful in a notebook: just use the returned
+        'html'/'svg' strings, e.g. IPython.display.HTML(result['html'])).
+    open_browser: if True, opens the written file in the default browser.
+
+    Returns a dict: {svg, html, events, total_time_us, sequence_name,
+    output_path}. 'events' are the RAW traced events (before the
+    gradient-trapezoid merge the renderer applies internally) -- useful
+    if you want to build your own rendering (e.g. the TikZ generator in
+    pp_tikz.py reuses this).
+    """
+    events, total_time, seq_name = trace_pp_file(pp_path, overrides)
+    svg = render_svg(events, total_time, seq_name, os.path.basename(pp_path))
+    params = dump_params(pp_path, overrides)
+    param_summary = "\n".join("{0} = {1}".format(k, v) for k, v in params.items())
+    html = render_html(svg, seq_name, pp_path, param_summary)
+
+    out_path = None
+    if output is not False:
+        out_path = output or (os.path.splitext(pp_path)[0] + ".timing.html")
+        with open(out_path, "w") as f:
+            f.write(html)
+        if open_browser:
+            webbrowser.open("file://" + os.path.abspath(out_path))
+
+    return {
+        'svg': svg, 'html': html, 'events': events,
+        'total_time_us': total_time, 'sequence_name': seq_name,
+        'output_path': out_path,
+    }
 
 
-def parse_overrides(pairs):
+# =============================================================================
+# CLI
+# =============================================================================
+
+def _parse_overrides(pairs):
     out = {}
     for p in pairs or []:
         if '=' not in p:
@@ -716,47 +938,16 @@ def main():
     ap.add_argument('-o', '--output', help="Output HTML path (default: alongside input, .timing.html)")
     ap.add_argument('--set', action='append', dest='overrides', metavar='KEY=VALUE',
                      help="Override a Parameter before tracing (repeatable), e.g. --set EchoNumber=4")
+    ap.add_argument('--open', action='store_true', help="Open the result in your default browser")
     args = ap.parse_args()
 
     if not os.path.isfile(args.pp_file):
         raise SystemExit("No such file: {0}".format(args.pp_file))
 
-    overrides = parse_overrides(args.overrides)
-    events, total_time, seq_name = trace_pp_file(args.pp_file, overrides)
-    svg = render_svg(events, total_time, seq_name, os.path.basename(args.pp_file))
-
-    # Re-run once more (fresh mock, undisturbed) just to dump the final
-    # Parameter values actually used, for the caption under the diagram.
-    clock2 = Clock()
-    install_mock_firebird(clock2, [])
-    mod = runpy.run_path(args.pp_file)
-    P = mod['Parameters']
-    P.NumScans, P.DS = 1, 0
-    if overrides:
-        for key, value in overrides.items():
-            current = getattr(P, key)
-            caster = type(current) if not isinstance(current, bool) else str
-            try:
-                setattr(P, key, caster(value))
-            except (TypeError, ValueError):
-                setattr(P, key, value)
-    lines = []
-    cls = type(P)
-    for name in sorted(dir(cls)):
-        if name.startswith('_'):
-            continue
-        val = getattr(P, name)
-        if callable(val):
-            continue
-        lines.append("{0} = {1}".format(name, val))
-    param_summary = "\n".join(lines)
-
-    html = render_html(svg, seq_name, args.pp_file, param_summary)
-
-    out_path = args.output or (os.path.splitext(args.pp_file)[0] + ".timing.html")
-    with open(out_path, "w") as f:
-        f.write(html)
-    print("Wrote {0} ({1} events, total {2})".format(out_path, len(events), _fmt_us(total_time)))
+    overrides = _parse_overrides(args.overrides)
+    result = visualize(args.pp_file, overrides=overrides, output=args.output, open_browser=args.open)
+    print("Wrote {0} ({1} events, total {2})".format(
+        result['output_path'], len(result['events']), _fmt_us(result['total_time_us'])))
 
 
 if __name__ == '__main__':
