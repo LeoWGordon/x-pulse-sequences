@@ -177,16 +177,51 @@ class TikzAxis(object):
 
 
 def _guess_pulse_label(width, params, seq_counters, lane):
+    # Tolerance 0.55us, not 0.05: shaped_pulse() rounds its Parameter
+    # duration to whole microseconds internally (n_steps = int(round(
+    # duration))) before synthesising the envelope, so a traced width can
+    # be up to 0.5us off its originating Parameter's exact value.
     for name, val in params.items():
         if isinstance(val, bool) or not isinstance(val, (int, float)):
             continue
-        if abs(float(val) - width) < 0.05:
+        if abs(float(val) - width) < 0.55:
             low = name.lower()
             for hint in RF_LABEL_HINTS:
                 if hint in low:
                     return "{0}\\textdegree".format(hint)
     seq_counters[lane] = seq_counters.get(lane, 0) + 1
     return "P{0}".format(seq_counters[lane])
+
+
+def _guess_shape_name(label, params, used_shape_keys):
+    """Best-effort match of a shaped pulse's flip-angle label (e.g.
+    '90\\textdegree', from _guess_pulse_label()) to the *Shape Parameter
+    that actually generated it -- this repo's selective/imaging-selective
+    family consistently names these 'ExcitationShape' (90) and
+    'RefocusShape' (180/270), see e.g. LWG_Selective-Echo_H.py. Returns
+    None (no label suffix) rather than guessing wrong when the hint
+    doesn't match anything -- e.g. WetShape, which isn't tied to a flip
+    angle this way."""
+    candidates = {k: v for k, v in params.items()
+                  if 'shape' in k.lower() and k not in used_shape_keys
+                  and isinstance(v, str) and v}
+    low_label = label.lower()
+    for key in sorted(candidates):
+        klow = key.lower()
+        if ('90' in low_label and 'excit' in klow) or \
+           (('180' in low_label or '270' in low_label) and 'refocus' in klow):
+            used_shape_keys.add(key)
+            return candidates[key]
+    return None
+
+
+def _downsample_profile(profile, max_points=48):
+    n = len(profile)
+    if n <= max_points:
+        return profile
+    step = (n - 1) / float(max_points - 1)
+    idx = sorted(set(int(round(i * step)) for i in range(max_points)))
+    return [profile[i] for i in idx]
 
 
 def _lane_v_to_y(v, y_base):
@@ -237,6 +272,7 @@ def render_tikz(events, total_time, seq_name, params):
 
     total_x = axis.total_units
     seq_counters = {}
+    used_shape_keys = set()
 
     # ---- Lane baselines + labels ----
     for lane in active_lanes:
@@ -265,10 +301,29 @@ def render_tikz(events, total_time, seq_name, params):
             if e['kind'] == 'pulse':
                 x0, w = axis.span(e['t_start'], e['t_end'])
                 label = _guess_pulse_label(e['duration'], params, seq_counters, lane)
-                lines.append("\\draw[fill=black] ({0:.3f},{1:.3f}) node[above]{{{2}}} "
-                              "({3:.3f},{4:.3f})rectangle({5:.3f},{6:.3f});"
-                              .format(x0 + w / 2.0, y + PULSE_HEIGHT + 0.15, label,
-                                      x0, y, x0 + w, y + PULSE_HEIGHT))
+                profile = e['meta'].get('shape_profile')
+                if profile and len(profile) >= 4:
+                    shape_name = _guess_shape_name(label, params, used_shape_keys)
+                    full_label = "{0} {1}".format(label, _esc(shape_name)) if shape_name else label
+                    pts = _downsample_profile(profile)
+                    peak = max(abs(v) for (_, v) in pts) or 1.0
+                    y_mid = y + PULSE_HEIGHT / 2.0
+                    half_h = PULSE_HEIGHT / 2.0
+                    curve_pts = ["({0:.3f},{1:.3f})".format(axis.px(e['t_start'] + t),
+                                                              y_mid + half_h * (v / peak))
+                                 for (t, v) in pts]
+                    path = ("({0:.3f},{1:.3f})--".format(x0, y_mid) + "--".join(curve_pts) +
+                            "--({0:.3f},{1:.3f})--cycle".format(x0 + w, y_mid))
+                    lines.append("\\draw[thick, fill=black!30] {0};".format(path))
+                    lines.append("\\draw[densely dashed, gray] ({0:.3f},{1:.3f})--({2:.3f},{1:.3f});"
+                                  .format(x0, y_mid, x0 + w))
+                    lines.append("\\node[above] at ({0:.3f},{1:.3f}) {{{2}}};"
+                                  .format(x0 + w / 2.0, y + PULSE_HEIGHT + 0.15, full_label))
+                else:
+                    lines.append("\\draw[fill=black] ({0:.3f},{1:.3f}) node[above]{{{2}}} "
+                                  "({3:.3f},{4:.3f})rectangle({5:.3f},{6:.3f});"
+                                  .format(x0 + w / 2.0, y + PULSE_HEIGHT + 0.15, label,
+                                          x0, y, x0 + w, y + PULSE_HEIGHT))
             elif e['kind'] == 'acqu':
                 x0, w = axis.span(e['t_start'], e['t_end'])
                 lines.append("\\draw[ultra thick, |-|] ({0:.3f},{1:.3f})--({2:.3f},{1:.3f}) "
@@ -285,9 +340,10 @@ def render_tikz(events, total_time, seq_name, params):
                     if pw < 0.15:
                         continue
                     ay = _lane_v_to_y(pv, y) + (0.28 if pv >= 0 else -0.28)
+                    label_side = "above" if pv >= 0 else "below"
                     lines.append("\\draw[<->] ({0:.3f},{1:.3f})--({2:.3f},{1:.3f}) "
-                                  "node[above=0.03,midway]{{\\large \\textdelta}};"
-                                  .format(px0, ay, px0 + pw))
+                                  "node[{3}=0.03,midway]{{\\large \\textdelta}};"
+                                  .format(px0, ay, px0 + pw, label_side))
         lines.append("")
 
     # ---- One headline <-> arrow for the most notable inter-event gap ----

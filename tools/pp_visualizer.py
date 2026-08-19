@@ -63,12 +63,14 @@ Design notes on the timing model:
     diagonal lines with a gap in between.
 
 Known limitations (v1):
-  - Shaped pulses (shaped_pulse()'s `with parallel:` sub-branches of
-    per-microsecond Transmit1SetScale()/Channel1SetBasePhase() calls)
-    are rendered as a single flat pulse block, not with their true
-    amplitude/phase envelope -- accurate for every HARD-pulse sequence
-    in this repo (PGSTE/PGSE/CPMG/Hahn-echo/etc.), a simplification for
-    the shaped/selective-pulse family (LWG_Selective-Echo_H.py etc.).
+  - The tracer captures a real signed amplitude envelope for shaped
+    pulses (shaped_pulse()'s `with parallel:` sub-branches of
+    per-microsecond Transmit1SetScale()/Channel1SetBasePhase() calls) --
+    see _attach_shape_profiles()/meta['shape_profile'] -- but this
+    built-in HTML renderer still draws every pulse (shaped or hard) as a
+    single flat block for simplicity. tools/pp_tikz.py draws the real
+    envelope for shaped pulses (EBURP2/REBURP/etc.) using this same
+    data.
   - Only traces one code path through run() -- e.g. an `if int(P.WetOn)`
     branch is traced with whatever WetOn value the Parameters carry
     (default, or your --set/overrides value); it does not show both
@@ -137,6 +139,8 @@ def install_mock_firebird(clock, events):
         'rx_phase': {1: 0.0, 2: 0.0},      # Receiver1/2Phase
         'grad': {1: 0.0, 2: 0.0, 3: 0.0},        # current Gradient1/2/3 value
         'grad_since': {1: 0.0, 2: 0.0, 3: 0.0},  # time current value began
+        'scale_samples': {1: [], 2: []},   # every Transmit1/2SetScale call: (t, value)
+        'phase_samples': {1: [], 2: []},   # every Channel1/2SetBasePhase call: (t, value)
     }
 
     def emit(lane, kind, t_start, duration, **meta):
@@ -168,6 +172,7 @@ def install_mock_firebird(clock, events):
 
     def _make_channel_phase(ch):
         def fn(duration, phase):
+            state['phase_samples'][ch].append((clock.t, phase))
             state['phase'][ch] = phase
             clock.advance(duration)
         return fn
@@ -189,6 +194,7 @@ def install_mock_firebird(clock, events):
 
     def _make_set_scale(ch):
         def fn(duration, scale):
+            state['scale_samples'][ch].append((clock.t, scale))
             state['scale'][ch] = scale
             clock.advance(duration)
         return fn
@@ -484,7 +490,11 @@ def dump_params(pp_path, overrides=None):
     clock = Clock()
     install_mock_firebird(clock, [])
     mod, P = _load_parameters(pp_path, overrides)
-    cls = type(P)
+    # P is the Parameters CLASS itself (this framework's pp files never
+    # instantiate it -- Parameter.__get__/__set__ work directly on class
+    # attribute access), so `cls = P` here, NOT `type(P)` -- type(P) would
+    # be the metaclass, whose dir() has no Parameter attributes at all.
+    cls = P
     out = {}
     for name in sorted(dir(cls)):
         if name.startswith('_'):
@@ -496,15 +506,55 @@ def dump_params(pp_path, overrides=None):
     return out
 
 
+def _attach_shape_profiles(events, state):
+    """Shaped pulses (shaped_pulse() in the selective/imaging-selective/WET
+    pp files) don't call a single 'shaped pulse' hardware instruction --
+    they synthesise the envelope on the fly as a `with parallel:` block of
+    one-microsecond-step Transmit1/2SetScale() (amplitude) and
+    Channel1/2SetBasePhase() (phase) calls running alongside the flat
+    Transmit1/2(n_steps) pulse event. Those per-step calls land at exactly
+    the same [t_start, t_end) window as the pulse event they belong to (the
+    parallel block's branches all start together), so any pulse event
+    whose window contains several SetScale/SetBasePhase samples is a
+    shaped pulse -- an ordinary hard pulse has none inside its own window.
+
+    Builds a SIGNED, pulse-relative envelope -- amplitude (from the scale
+    calls) times +-1 depending on whether that step's phase matches the
+    pulse's own starting phase or is ~180 degrees from it (the only two
+    values this repo's shape tables ever produce) -- and attaches it as
+    meta['shape_profile'] = [(t_relative_to_pulse_start, signed_amp), ...].
+    Left absent for ordinary (non-shaped) pulses."""
+    for e in events:
+        if e['kind'] != 'pulse':
+            continue
+        ch = 1 if e['lane'] == 'HF' else 2
+        scale_hits = sorted((t, v) for (t, v) in state['scale_samples'][ch]
+                             if e['t_start'] <= t < e['t_end'])
+        phase_hits = sorted((t, v) for (t, v) in state['phase_samples'][ch]
+                             if e['t_start'] <= t < e['t_end'])
+        if len(scale_hits) < 4 or len(phase_hits) < 4:
+            continue
+        ref_phase = phase_hits[0][1]
+        n = min(len(scale_hits), len(phase_hits))
+        profile = []
+        for i in range(n):
+            t, amp = scale_hits[i]
+            _, ph = phase_hits[i]
+            sign = math.cos(math.radians(ph - ref_phase))
+            profile.append((t - e['t_start'], amp * sign))
+        e['meta']['shape_profile'] = profile
+
+
 def trace_pp_file(pp_path, overrides=None):
     """Run one scan of pp_path's run() through the instrumented mock and
     return (events, total_time_us, sequence_name)."""
     clock = Clock()
     events = []
-    install_mock_firebird(clock, events)
+    state = install_mock_firebird(clock, events)
 
     mod, P = _load_parameters(pp_path, overrides)
     mod['run'](FakeComms())
+    _attach_shape_profiles(events, state)
 
     seq_name = getattr(P, 'Sequence', os.path.basename(pp_path))
     return events, clock.t, seq_name
