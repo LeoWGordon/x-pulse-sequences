@@ -352,9 +352,10 @@ def render_tikz(events, total_time, seq_name, params, show_values=False):
         x0, x1 = axis.px(t0), axis.px(t1)
         y = min(y_of.values()) - GRAD_HEIGHT - 1.1 if lane_hint == 'below' else \
             max(y_of.values()) + PULSE_HEIGHT + 1.6
+        delta_label = "\\textDelta\\ ({0})".format(_fmt_us(t1 - t0)) if show_values else "\\textDelta"
         lines.append("\\draw[<->, ultra thick] ({0:.3f},{1:.3f})--({2:.3f},{1:.3f}) "
-                      "node[below=0.05,midway]{{\\large \\textDelta\\ ({3})}};"
-                      .format(x0, y, x1, _fmt_us(t1 - t0)))
+                      "node[below=0.05,midway]{{\\large {3}}};"
+                      .format(x0, y, x1, delta_label))
         lines.append("")
 
     # ---- Decaying "Detection" squiggle after the final acquisition ----
