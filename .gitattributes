@@ -1,0 +1,23 @@
+# The X-Pulse pulse-sequence compiler accepts ONLY Windows CRLF line
+# endings. An LF-saved sequence fails to compile, with no useful error
+# message (see LWG_1D-Image-Echo_H.py's changelog item 10g for the
+# debugging story, and the pulse-programme-parameters skill, rule 1).
+#
+# "-text" tells git never to convert these files in either direction, so
+# the CRLF bytes committed here are the exact bytes checked out on every
+# platform -- including a Windows clone, where Git for Windows defaults to
+# core.autocrlf=true and would otherwise rewrite them -- and the exact
+# bytes GitHub serves for a raw download, which is often how a sequence
+# reaches the instrument PC.
+#
+# The alternative spelling, "text eol=crlf", would store LF in the repo and
+# convert on checkout. Correct for a clone, but a raw download would then
+# deliver LF and silently fail to compile. Do not switch to it.
+#
+# Diffs stay textual -- this is "-text", not "binary".
+#
+# Deliberately NO "* text=auto" line: a catch-all would mark every existing
+# file for renormalisation, and nothing outside sequences/ is compiled by
+# the instrument, so there is nothing to gain and a large accidental diff
+# to lose.
+sequences/**/*.py -text
