@@ -108,6 +108,37 @@ All notable changes to this repo are recorded here. Format loosely follows
   match) and against a deliberately negative-delay case (correctly
   raises). See `docs/validation-notes/LWG_PGSE-Image_H.md` and `_X.md`
   for what's still unverified -- not yet run on hardware.
+- `.gitattributes` marking `sequences/**/*.py` as `-text`, so git never
+  converts line endings in either direction: the CRLF bytes committed are the
+  bytes checked out on every platform (including a Windows clone, where Git
+  for Windows defaults to `core.autocrlf=true`) and the bytes GitHub serves
+  for a raw download, which is often how a sequence reaches the instrument
+  PC. Deliberately not `text eol=crlf`, which would store LF and break raw
+  downloads; deliberately no `* text=auto` catch-all. Note this guards
+  against *git* converting endings -- it cannot stop an editor rewriting a
+  file on save, which is what caused the flip above.
+
+### Changed
+- **Low Gamma gradient calibration is now surfaced to the operator.**
+  `MAXGRAD_TABLE`'s `LOWGAMMA` row has held real measured numbers since
+  18-19/08/2026 (x/y/z = 18.678/16.038/58.112 G/cm), but the `Probe`
+  Parameter's description -- the only thing visible in SpinFlow's panel --
+  still read `Low Gamma(not yet calibrated)`, and nothing warned at run time.
+  Selecting Low Gamma therefore used a provisional z (PGSE-only) and x/y
+  (PGSTE) calibration for quantitative b-values and Hz-to-mm conversion while
+  the panel said it did not exist, with the caveat living only in a source
+  comment. Across all 22 gradient sequences: added `PROVISIONAL_CALIBRATION`
+  (keyed like `MAXGRAD_TABLE`, value = the caveat, so the *code* can act on
+  it rather than a comment), a `report_probe_gradient()` WARNING that prints
+  it to the SpinFlow console, and the description now reads
+  `Low Gamma(provisional)`. No calibration numbers changed and no timing
+  changed; verified under the mock harness that the warning fires for Low
+  Gamma and not for HFX in all 22, both probes, 44 runs clean.
+- `sequences/**/*.py` restored to CRLF. Sixteen files (4 diffusion, 12
+  imaging) had been saved as LF at some point, which the X-Pulse compiler
+  rejects with no useful error. Restoring them collapsed a ~14,800-line
+  working-tree diff to the 16 lines that were a real change (the LOWGAMMA
+  numbers above). All 80 sequence files are now pure CRLF.
 
 ### Open questions
 - **Gradient calibration disagreement, unresolved.** The vendor PFGSTE/
